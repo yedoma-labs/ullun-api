@@ -34,7 +34,10 @@ impl App {
     where
         H: Handler,
     {
-        if let Err(e) = self.router.insert("GET", path, Arc::new(handler) as DynHandler) {
+        if let Err(e) = self
+            .router
+            .insert("GET", path, Arc::new(handler) as DynHandler)
+        {
             panic!("Failed to register GET route {}: {}", path, e);
         }
         self
@@ -61,7 +64,10 @@ impl App {
     where
         H: Handler,
     {
-        if let Err(e) = self.router.insert("POST", path, Arc::new(handler) as DynHandler) {
+        if let Err(e) = self
+            .router
+            .insert("POST", path, Arc::new(handler) as DynHandler)
+        {
             panic!("Failed to register POST route {}: {}", path, e);
         }
         self
@@ -72,7 +78,10 @@ impl App {
     where
         H: Handler,
     {
-        if let Err(e) = self.router.insert("PUT", path, Arc::new(handler) as DynHandler) {
+        if let Err(e) = self
+            .router
+            .insert("PUT", path, Arc::new(handler) as DynHandler)
+        {
             panic!("Failed to register PUT route {}: {}", path, e);
         }
         self
@@ -83,7 +92,10 @@ impl App {
     where
         H: Handler,
     {
-        if let Err(e) = self.router.insert("DELETE", path, Arc::new(handler) as DynHandler) {
+        if let Err(e) = self
+            .router
+            .insert("DELETE", path, Arc::new(handler) as DynHandler)
+        {
             panic!("Failed to register DELETE route {}: {}", path, e);
         }
         self
@@ -94,7 +106,10 @@ impl App {
     where
         H: Handler,
     {
-        if let Err(e) = self.router.insert("PATCH", path, Arc::new(handler) as DynHandler) {
+        if let Err(e) = self
+            .router
+            .insert("PATCH", path, Arc::new(handler) as DynHandler)
+        {
             panic!("Failed to register PATCH route {}: {}", path, e);
         }
         self
@@ -211,7 +226,7 @@ async fn handle_request(
             } else {
                 // Create middleware chain
                 let mut chain = middlewares.to_vec();
-                
+
                 // Add final handler as last middleware
                 let final_handler = Arc::new(move |req: Request, _next: Next| {
                     let h = handler.clone();

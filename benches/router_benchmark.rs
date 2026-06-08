@@ -13,7 +13,11 @@ fn benchmark_router_insert(c: &mut Criterion) {
             for i in 0..10 {
                 let path = format!("/route{}", i);
                 router
-                    .insert("GET", &path, Arc::new(dummy_handler) as Arc<dyn ullun::handler::Handler>)
+                    .insert(
+                        "GET",
+                        &path,
+                        Arc::new(dummy_handler) as Arc<dyn ullun::handler::Handler>,
+                    )
                     .unwrap();
             }
             black_box(router);
@@ -26,7 +30,11 @@ fn benchmark_router_insert(c: &mut Criterion) {
             for i in 0..100 {
                 let path = format!("/route{}", i);
                 router
-                    .insert("GET", &path, Arc::new(dummy_handler) as Arc<dyn ullun::handler::Handler>)
+                    .insert(
+                        "GET",
+                        &path,
+                        Arc::new(dummy_handler) as Arc<dyn ullun::handler::Handler>,
+                    )
                     .unwrap();
             }
             black_box(router);
@@ -39,30 +47,46 @@ fn benchmark_router_match(c: &mut Criterion) {
     for i in 0..100 {
         let path = format!("/route{}", i);
         router
-            .insert("GET", &path, Arc::new(dummy_handler) as Arc<dyn ullun::handler::Handler>)
+            .insert(
+                "GET",
+                &path,
+                Arc::new(dummy_handler) as Arc<dyn ullun::handler::Handler>,
+            )
             .unwrap();
     }
-    router.insert("GET", "/users/{id}", Arc::new(dummy_handler) as Arc<dyn ullun::handler::Handler>).unwrap();
-    router.insert("GET", "/posts/{id}/comments/{comment_id}", Arc::new(dummy_handler) as Arc<dyn ullun::handler::Handler>).unwrap();
+    router
+        .insert(
+            "GET",
+            "/users/{id}",
+            Arc::new(dummy_handler) as Arc<dyn ullun::handler::Handler>,
+        )
+        .unwrap();
+    router
+        .insert(
+            "GET",
+            "/posts/{id}/comments/{comment_id}",
+            Arc::new(dummy_handler) as Arc<dyn ullun::handler::Handler>,
+        )
+        .unwrap();
 
     c.bench_function("router_match_static", |b| {
         b.iter(|| {
             let result = router.match_route("GET", "/route50");
-            black_box(result);
+            let _ = black_box(result);
         });
     });
 
     c.bench_function("router_match_one_param", |b| {
         b.iter(|| {
             let result = router.match_route("GET", "/users/123");
-            black_box(result);
+            let _ = black_box(result);
         });
     });
 
     c.bench_function("router_match_multi_param", |b| {
         b.iter(|| {
             let result = router.match_route("GET", "/posts/456/comments/789");
-            black_box(result);
+            let _ = black_box(result);
         });
     });
 }

@@ -1,5 +1,6 @@
 //! End-to-end integration tests with real HTTP requests
 
+use http_body_util::BodyExt;
 use hyper::{Request, StatusCode};
 use hyper_util::rt::TokioIo;
 use serde_json::json;
@@ -40,7 +41,7 @@ async fn test_hello_world() {
     let response = sender.send_request(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body_bytes = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
     let body = String::from_utf8(body_bytes.to_vec()).unwrap();
     assert_eq!(body, "Hello, World!");
 
@@ -65,7 +66,7 @@ async fn test_path_params() {
     let stream = TcpStream::connect("127.0.0.1:3002").await.unwrap();
     let io = TokioIo::new(stream);
     let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await.unwrap();
-    
+
     tokio::task::spawn(async move {
         let _ = conn.await;
     });
@@ -78,7 +79,7 @@ async fn test_path_params() {
     let response = sender.send_request(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body_bytes = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
     let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
     assert_eq!(body["user_id"], "123");
 
@@ -101,7 +102,7 @@ async fn test_404_not_found() {
     let stream = TcpStream::connect("127.0.0.1:3003").await.unwrap();
     let io = TokioIo::new(stream);
     let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await.unwrap();
-    
+
     tokio::task::spawn(async move {
         let _ = conn.await;
     });
@@ -134,7 +135,7 @@ async fn test_json_post() {
     let stream = TcpStream::connect("127.0.0.1:3004").await.unwrap();
     let io = TokioIo::new(stream);
     let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await.unwrap();
-    
+
     tokio::task::spawn(async move {
         let _ = conn.await;
     });
@@ -151,7 +152,7 @@ async fn test_json_post() {
     let response = sender.send_request(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body_bytes = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
     let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
     assert_eq!(body["name"], "Alice");
     assert_eq!(body["age"], 30);
@@ -169,17 +170,19 @@ async fn test_middleware_execution() {
 
     let server = tokio::spawn(async move {
         let log = log_clone;
-        
+
         App::new()
-            .middleware(move |req: ullun::request::Request, next| {
-                let log = log.clone();
-                async move {
-                    log.lock().await.push("before");
-                    let response = next.run(req).await?;
-                    log.lock().await.push("after");
-                    Ok(response)
-                }
-            })
+            .middleware(
+                move |req: ullun::request::Request, next: ullun::middleware::Next| {
+                    let log = log.clone();
+                    async move {
+                        log.lock().await.push("before");
+                        let response = next.run(req).await?;
+                        log.lock().await.push("after");
+                        Ok(response)
+                    }
+                },
+            )
             .get("/", |_req: ullun::request::Request| async {
                 Ok(Response::text("OK"))
             })
@@ -192,7 +195,7 @@ async fn test_middleware_execution() {
     let stream = TcpStream::connect("127.0.0.1:3005").await.unwrap();
     let io = TokioIo::new(stream);
     let (mut sender, conn) = hyper::client::conn::http1::handshake(io).await.unwrap();
-    
+
     tokio::task::spawn(async move {
         let _ = conn.await;
     });

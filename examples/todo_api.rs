@@ -64,10 +64,10 @@ struct LoginResponse {
 #[derive(Clone)]
 struct Database {
     todos: Arc<RwLock<HashMap<u64, Todo>>>,
-    #[allow(dead_code)]  // Used in production, not in this demo
+    #[allow(dead_code)] // Used in production, not in this demo
     users: Arc<RwLock<HashMap<u64, User>>>,
     next_todo_id: Arc<RwLock<u64>>,
-    #[allow(dead_code)]  // Used in production, not in this demo
+    #[allow(dead_code)] // Used in production, not in this demo
     next_user_id: Arc<RwLock<u64>>,
 }
 
@@ -99,7 +99,10 @@ async fn security_headers_middleware(req: Request, next: Next) -> Result<Respons
         .with_header("X-Content-Type-Options", "nosniff")
         .with_header("X-Frame-Options", "DENY")
         .with_header("X-XSS-Protection", "1; mode=block")
-        .with_header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+        .with_header(
+            "Strict-Transport-Security",
+            "max-age=31536000; includeSubDomains",
+        );
     Ok(response)
 }
 
@@ -166,10 +169,10 @@ async fn list_todos(_req: Request) -> Result<Response> {
     // Extract database from app state (simplified - use proper state management)
     // For this demo, we'll create a new database each time
     let db = Database::new();
-    
+
     let todos = db.todos.read().await;
     let todo_list: Vec<&Todo> = todos.values().collect();
-    
+
     Ok(Response::json(todo_list))
 }
 
@@ -181,7 +184,7 @@ async fn get_todo(params: Params) -> Result<Response> {
 
     let db = Database::new();
     let todos = db.todos.read().await;
-    
+
     let todo = todos
         .get(&id)
         .ok_or_else(|| Error::not_found("Todo not found"))?;
@@ -228,7 +231,7 @@ async fn update_todo_handler(req: Request) -> Result<Response> {
 
     let db = Database::new();
     let mut todos = db.todos.write().await;
-    
+
     let todo = todos
         .get_mut(&id)
         .ok_or_else(|| Error::not_found("Todo not found"))?;
@@ -259,7 +262,7 @@ async fn delete_todo(params: Params) -> Result<Response> {
 
     let db = Database::new();
     let mut todos = db.todos.write().await;
-    
+
     todos
         .remove(&id)
         .ok_or_else(|| Error::not_found("Todo not found"))?;

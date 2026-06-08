@@ -68,14 +68,18 @@ pub async fn logger(req: Request, next: Next) -> Result<Response> {
 /// CORS middleware with preflight support
 pub fn cors(
     allowed_origins: Vec<String>,
-) -> impl Fn(Request, Next) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response>> + Send>> + Clone {
+) -> impl Fn(
+    Request,
+    Next,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response>> + Send>>
+       + Clone {
     move |req: Request, next: Next| {
         let origins = allowed_origins.clone();
         Box::pin(async move {
             // Handle preflight OPTIONS requests
             if req.method == http::Method::OPTIONS {
                 let mut response = Response::new(http::StatusCode::NO_CONTENT);
-                
+
                 if !origins.is_empty() {
                     let origin = if origins.contains(&"*".to_string()) {
                         "*".to_string()
@@ -84,17 +88,23 @@ pub fn cors(
                         origins[0].clone()
                     };
                     response = response.with_header("Access-Control-Allow-Origin", origin);
-                    response = response.with_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
-                    response = response.with_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+                    response = response.with_header(
+                        "Access-Control-Allow-Methods",
+                        "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+                    );
+                    response = response.with_header(
+                        "Access-Control-Allow-Headers",
+                        "Content-Type, Authorization",
+                    );
                     response = response.with_header("Access-Control-Max-Age", "86400");
                 }
-                
+
                 return Ok(response);
             }
-            
+
             // Regular request - add CORS headers to response
             let mut response = next.run(req).await?;
-            
+
             if !origins.is_empty() {
                 let origin = if origins.contains(&"*".to_string()) {
                     "*".to_string()
@@ -104,7 +114,7 @@ pub fn cors(
                 response = response.with_header("Access-Control-Allow-Origin", origin);
                 response = response.with_header("Access-Control-Allow-Credentials", "true");
             }
-            
+
             Ok(response)
         })
     }

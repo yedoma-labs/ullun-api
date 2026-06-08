@@ -26,7 +26,12 @@ impl Router {
             "PUT" => &mut self.put,
             "DELETE" => &mut self.delete,
             "PATCH" => &mut self.patch,
-            _ => return Err(Error::bad_request(format!("Unsupported method: {}", method))),
+            _ => {
+                return Err(Error::bad_request(format!(
+                    "Unsupported method: {}",
+                    method
+                )))
+            }
         };
 
         router
@@ -81,8 +86,10 @@ mod tests {
         let mut router = Router::new();
         let handler = Arc::new(TestHandler) as DynHandler;
 
-        router.insert("GET", "/hello/{name}", handler.clone()).unwrap();
-        
+        router
+            .insert("GET", "/hello/{name}", handler.clone())
+            .unwrap();
+
         let (_, params) = router.match_route("GET", "/hello/world").unwrap();
         assert_eq!(params.get("name").unwrap(), "world");
     }

@@ -100,7 +100,10 @@ impl Request {
         headers: http::HeaderMap,
         body: bytes::Bytes,
     ) -> Self {
-        let query = uri.query().map(Query::parse_query_string).unwrap_or_default();
+        let query = uri
+            .query()
+            .map(Query::parse_query_string)
+            .unwrap_or_default();
 
         Self {
             method,

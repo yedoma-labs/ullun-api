@@ -33,7 +33,7 @@ impl Response {
     pub fn with_header(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         let key = key.into();
         let value = value.into();
-        
+
         // Validate and insert header, skip invalid ones
         if let (Ok(header_name), Ok(header_value)) = (
             http::HeaderName::from_bytes(key.as_bytes()),
@@ -67,14 +67,14 @@ impl Response {
     }
 
     pub fn from_error(error: Error) -> Self {
-        let status = StatusCode::from_u16(error.status_code())
-            .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        let status =
+            StatusCode::from_u16(error.status_code()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
         let body = serde_json::json!({
             "error": error.message(),
             "status": error.status_code(),
         });
-        let body_bytes = serde_json::to_vec(&body)
-            .unwrap_or_else(|_| b"{\"error\":\"Unknown error\"}".to_vec());
+        let body_bytes =
+            serde_json::to_vec(&body).unwrap_or_else(|_| b"{\"error\":\"Unknown error\"}".to_vec());
         Self::new(status)
             .with_header("content-type", "application/json")
             .with_body(body_bytes)
@@ -87,12 +87,15 @@ impl Response {
             builder = builder.header(key, value);
         }
 
-        builder.body(http_body_util::Full::new(self.body))
+        builder
+            .body(http_body_util::Full::new(self.body))
             .unwrap_or_else(|e| {
                 eprintln!("Failed to build response: {}", e);
                 hyper::Response::builder()
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(http_body_util::Full::new(Bytes::from("Internal Server Error")))
+                    .body(http_body_util::Full::new(Bytes::from(
+                        "Internal Server Error",
+                    )))
                     .unwrap()
             })
     }
