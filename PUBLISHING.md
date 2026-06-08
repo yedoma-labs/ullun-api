@@ -1,19 +1,82 @@
 # Publishing ullun-api to crates.io
 
-## Prerequisites
+## Two Publishing Methods
 
-### 1. Create crates.io Account
+### Method 1: Automated via GitHub Actions (Recommended)
+Push a git tag, CI handles the rest.
+
+### Method 2: Manual via cargo publish
+Publish directly from your machine.
+
+---
+
+## Method 1: Automated Publishing (CI)
+
+### One-Time Setup
+
+#### 1. Get crates.io API Token
+1. Visit https://crates.io/settings/tokens
+2. Click "New Token"
+3. Name: "GitHub Actions - ullun-api"
+4. Scopes: `publish-update` (default)
+5. **Copy the token** (starts with `cio_`)
+
+#### 2. Add Token to GitHub Secrets
+1. Go to https://github.com/yedoma-labs/ullun-api/settings/secrets/actions
+2. Click **"New repository secret"**
+3. **Name:** `CARGO_REGISTRY_TOKEN`
+4. **Value:** Paste your crates.io token
+5. Click **"Add secret"**
+
+✅ **Done!** CI will auto-publish on version tags.
+
+### Publishing a Release
+
+```bash
+# 1. Update version in Cargo.toml
+vim Cargo.toml  # Change version = "0.1.0" to "0.1.1"
+
+# 2. Update CHANGELOG.md
+vim CHANGELOG.md
+
+# 3. Commit changes
+git add Cargo.toml CHANGELOG.md
+git commit -m "Bump version to 0.1.1"
+git push origin main
+
+# 4. Create and push tag (triggers CI publish)
+git tag -a v0.1.1 -m "Release v0.1.1"
+git push origin v0.1.1
+
+# CI will:
+# - Verify version matches tag
+# - Run all tests
+# - Publish to crates.io
+# - Create GitHub release
+```
+
+**Monitor progress:**
+- https://github.com/yedoma-labs/ullun-api/actions
+- https://crates.io/crates/ullun-api
+
+---
+
+## Method 2: Manual Publishing
+
+### Prerequisites
+
+#### 1. Create crates.io Account
 1. Visit https://crates.io
 2. Click "Log in with GitHub"
 3. Authorize the application
 
-### 2. Get API Token
+#### 2. Get API Token
 1. Go to https://crates.io/settings/tokens
 2. Click "New Token"
 3. Name it (e.g., "ullun-api publish")
 4. Copy the token
 
-### 3. Login via Cargo
+#### 3. Login via Cargo
 ```bash
 cargo login
 # Paste your API token when prompted
