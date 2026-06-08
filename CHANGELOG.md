@@ -11,20 +11,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Route groups:** Organize routes with common prefixes using `App::group()`
-- **Cookie support:** Parse cookies with `req.cookies()` and set with `response.cookie()`
-- **Static file serving:** Serve files from directories with `serve_static()`
-- **Request body size limits:** Configurable max body size with `max_body_size()` (default 10MB)
-- Content-Type detection for 20+ file types
-- Security: Directory traversal protection for static files
-- SameSite cookie attribute support
+  - Group-level route registration
+  - Clean API organization
+  - Example: `.group("/api", |g| g.get("/users", handler))`
+  
+- **Cookie support:** Full HTTP cookie handling
+  - Parse cookies with `req.cookies()`
+  - Set cookies with `response.cookie()`
+  - Cookie attributes: domain, path, max-age, secure, httponly, samesite
+  - Type-safe SameSite enum (Strict, Lax, None)
+  - RFC 6265bis compliance
+  
+- **Static file serving:** Production-ready file server
+  - `serve_static("/prefix/", "directory")` method
+  - Content-Type detection for 20+ file types
+  - Directory traversal protection (canonical path validation)
+  - Index.html fallback for directories
+  - Cache-Control headers
+  
+- **Request body size limits:** DoS prevention
+  - Default 10MB limit
+  - Configurable with `max_body_size(Some(bytes))`
+  - Enforced during streaming (prevents bypass)
+  - Returns 413 Payload Too Large
 
 ### Changed
-- Request struct now includes optional cookies field
+- Request struct uses `OnceCell` for lazy cookie parsing
+- `req.cookies()` now takes `&self` instead of `&mut self`
 - Response struct supports multiple Set-Cookie headers
 
 ### Security
-- Added body size limit enforcement (prevents DoS attacks)
-- Static file handler validates canonical paths
+- **[CRITICAL]** Fixed TOCTOU race in static file path traversal check
+- **[CRITICAL]** Enforced body size limit during streaming (prevents chunked bypass)
+- **[CRITICAL]** Added cookie value validation (prevents header injection)
+- **[HIGH]** Auto-enable Secure flag for SameSite=None cookies
+- **[HIGH]** Static file handler validates canonical paths before serving
+- Cookie names/values validated against forbidden characters (`;`, `=`, control chars)
+
+### Fixed
+- Removed broken group-level middleware (would apply globally)
+- Fixed redundant local variable warnings
+
+### Breaking Changes
+- None - fully backward compatible with 0.1.0
 
 ## [0.1.0] - 2026-06-08
 

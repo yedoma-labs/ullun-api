@@ -11,7 +11,7 @@
 [![Rust Version](https://img.shields.io/badge/rust-1.96%2B-blue.svg)](https://www.rust-lang.org)
 
 [![codecov](https://codecov.io/gh/yedoma-labs/ullun-api/branch/main/graph/badge.svg)](https://codecov.io/gh/yedoma-labs/ullun-api)
-[![Lines of Code](https://img.shields.io/badge/lines-1.6k-blue)](src/)
+[![Lines of Code](https://img.shields.io/badge/lines-~2.8k-blue)](src/)
 [![No Unsafe](https://img.shields.io/badge/unsafe-0%25-success)](#security)
 [![Performance](https://img.shields.io/badge/throughput-50k%2B%20req%2Fs-green)](docs/PERFORMANCE.md)
 [![Binary Size](https://img.shields.io/badge/binary-~1.5MB-lightgrey)](#features)
@@ -95,7 +95,7 @@ async fn main() {
 
 ```toml
 [dependencies]
-ullun = "0.1"
+ullun-api = "0.2"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -173,6 +173,73 @@ App::new()
     .run("127.0.0.1:3000")
     .await
     .unwrap();
+```
+
+### Route Groups (v0.2.0)
+
+```rust
+App::new()
+    .group("/api", |group| {
+        group
+            .get("/users", list_users)
+            .post("/users", create_user)
+    })
+    .group("/admin", |group| {
+        group
+            .get("/dashboard", admin_dashboard)
+            .post("/settings", update_settings)
+    })
+    .run("127.0.0.1:3000")
+    .await?;
+```
+
+### Cookie Handling (v0.2.0)
+
+```rust
+use ullun::cookies::{Cookie, SameSite};
+
+// Reading cookies
+async fn get_session(req: Request) -> Result<Response> {
+    let cookies = req.cookies();
+    if let Some(session_id) = cookies.get("session") {
+        Ok(Response::text(format!("Session: {}", session_id)))
+    } else {
+        Err(Error::unauthorized("Not logged in"))
+    }
+}
+
+// Setting cookies
+async fn login(_req: Request) -> Result<Response> {
+    let cookie = Cookie::new("session", "abc123")
+        .path("/")
+        .max_age(3600)
+        .http_only()
+        .secure()
+        .same_site(SameSite::Lax);
+    
+    Ok(Response::text("Logged in").cookie(cookie))
+}
+```
+
+### Static Files (v0.2.0)
+
+```rust
+App::new()
+    .serve_static("/", "public")        // Serve from 'public' directory
+    .serve_static("/assets", "dist")    // Serve from 'dist' at /assets
+    .run("127.0.0.1:3000")
+    .await?;
+```
+
+### Body Size Limits (v0.2.0)
+
+```rust
+App::new()
+    .max_body_size(Some(5 * 1024 * 1024))  // 5 MB limit
+    // or
+    .max_body_size(None)                    // Unlimited (not recommended)
+    .run("127.0.0.1:3000")
+    .await?;
 ```
 
 ## API Reference
