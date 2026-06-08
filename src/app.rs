@@ -19,6 +19,7 @@ use tokio::net::TcpListener;
 pub struct App {
     router: Router,
     middlewares: Vec<Arc<dyn Middleware>>,
+    max_body_size: Option<usize>, // in bytes
 }
 
 /// Route group builder
@@ -33,7 +34,14 @@ impl App {
         Self {
             router: Router::new(),
             middlewares: Vec::new(),
+            max_body_size: Some(10 * 1024 * 1024), // 10 MB default
         }
+    }
+
+    /// Set maximum request body size in bytes (None = unlimited)
+    pub fn max_body_size(mut self, size: Option<usize>) -> Self {
+        self.max_body_size = size;
+        self
     }
 
     /// Create a route group with a common prefix
@@ -177,6 +185,7 @@ impl App {
 
         let router = Arc::new(self.router);
         let middlewares = Arc::new(self.middlewares);
+        let max_body_size = self.max_body_size;
 
         // Graceful shutdown signal
         let shutdown = async {
@@ -191,7 +200,7 @@ impl App {
                 println!("✅ Server stopped");
                 Ok(())
             }
-            result = Self::serve_loop(listener, router, middlewares) => result
+            result = Self::serve_loop(listener, router, middlewares, max_body_size) => result
         }
     }
 
@@ -199,6 +208,7 @@ impl App {
         listener: TcpListener,
         router: Arc<Router>,
         middlewares: Arc<Vec<Arc<dyn Middleware>>>,
+        max_body_size: Option<usize>,
     ) -> Result<()> {
         loop {
             let (stream, _) = listener
@@ -209,6 +219,7 @@ impl App {
             let io = TokioIo::new(stream);
             let router = router.clone();
             let middlewares = middlewares.clone();
+            let max_body_size = max_body_size;
 
             tokio::task::spawn(async move {
                 if let Err(err) = http1::Builder::new()
@@ -217,8 +228,11 @@ impl App {
                         service_fn(|req| {
                             let router = router.clone();
                             let middlewares = middlewares.clone();
+                            let max_body_size = max_body_size;
                             async move {
-                                Ok::<_, Infallible>(handle_request(req, router, middlewares).await)
+                                Ok::<_, Infallible>(
+                                    handle_request(req, router, middlewares, max_body_size).await,
+                                )
                             }
                         }),
                     )
@@ -300,12 +314,31 @@ async fn handle_request(
     req: hyper::Request<hyper::body::Incoming>,
     router: Arc<Router>,
     middlewares: Arc<Vec<Arc<dyn Middleware>>>,
+    max_body_size: Option<usize>,
 ) -> hyper::Response<http_body_util::Full<bytes::Bytes>> {
     let method = req.method().to_string();
     let path = req.uri().path().to_string();
 
     // Convert hyper request to our Request type
     let (parts, body) = req.into_parts();
+
+    // Check Content-Length against max_body_size
+    if let Some(max_size) = max_body_size {
+        if let Some(content_length) = parts.headers.get(http::header::CONTENT_LENGTH) {
+            if let Ok(length_str) = content_length.to_str() {
+                if let Ok(length) = length_str.parse::<usize>() {
+                    if length > max_size {
+                        let error_response = Response::from_error(Error::custom(
+                            413,
+                            format!("Request body too large (max {} bytes)", max_size),
+                        ));
+                        return error_response.into_hyper();
+                    }
+                }
+            }
+        }
+    }
+
     let body_bytes = match body.collect().await {
         Ok(collected) => collected.to_bytes(),
         Err(_) => bytes::Bytes::new(),

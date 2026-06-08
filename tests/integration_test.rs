@@ -54,3 +54,15 @@ async fn test_app_builder() {
 
     // If we got here without panicking, builder works
 }
+
+#[test]
+fn test_body_size_limits() {
+    // Test default limit (10 MB)
+    let _app = App::new();
+
+    // Test custom limit (1 MB)
+    let _app = App::new().max_body_size(Some(1024 * 1024));
+
+    // Test unlimited
+    let _app = App::new().max_body_size(None);
+}

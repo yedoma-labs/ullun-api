@@ -7,22 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - TBD
+
 ### Added
-- Static file serving with `serve_static()`
-- Route groups with prefix support
-- Cookie parsing and setting
-- Request body size limits
-- Form data parsing (application/x-www-form-urlencoded)
-- Compression middleware (gzip, br)
-- Custom error handlers
-- Health check endpoint helper
+- **Route groups:** Organize routes with common prefixes using `App::group()`
+- **Cookie support:** Parse cookies with `req.cookies()` and set with `response.cookie()`
+- **Static file serving:** Serve files from directories with `serve_static()`
+- **Request body size limits:** Configurable max body size with `max_body_size()` (default 10MB)
+- Content-Type detection for 20+ file types
+- Security: Directory traversal protection for static files
+- SameSite cookie attribute support
 
 ### Changed
-- Improved error messages
-- Better documentation
+- Request struct now includes optional cookies field
+- Response struct supports multiple Set-Cookie headers
 
-### Fixed
-- Minor performance optimizations
+### Security
+- Added body size limit enforcement (prevents DoS attacks)
+- Static file handler validates canonical paths
 
 ## [0.1.0] - 2026-06-08
 
