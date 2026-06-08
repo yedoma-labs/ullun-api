@@ -1,0 +1,17 @@
+# Rust
+/target/
+**/*.rs.bk
+# Cargo.lock is checked in for applications, not libraries
+# But we'll check it in for CI stability
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Local config
+.env
+*.log
