@@ -6,8 +6,17 @@ authors = ["yedoma-labs"]
 description = "Express.js-inspired web framework for Rust - simple, fast, batteries-included"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/yedoma-labs/ullun-api"
+homepage = "https://github.com/yedoma-labs/ullun-api"
+documentation = "https://docs.rs/ullun-api"
+readme = "README.md"
 keywords = ["web", "framework", "api", "microservices", "http"]
 categories = ["web-programming::http-server"]
+exclude = [
+    ".github/*",
+    ".dockerignore",
+    "Dockerfile",
+    "target/*",
+]
 
 [dependencies]
 # Core HTTP
