@@ -1,5 +1,6 @@
 //! Request types and extractors
 
+use crate::cookies::Cookies;
 use crate::error::{Error, Result};
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
@@ -91,6 +92,7 @@ pub struct Request {
     pub body: bytes::Bytes,
     pub params: Params,
     pub query: Query,
+    cookies: Option<Cookies>,
 }
 
 impl Request {
@@ -112,7 +114,25 @@ impl Request {
             body,
             params: Params::new(),
             query,
+            cookies: None,
         }
+    }
+
+    /// Get cookies from the request
+    pub fn cookies(&mut self) -> &Cookies {
+        if self.cookies.is_none() {
+            let cookies = if let Some(cookie_header) = self.headers.get("cookie") {
+                if let Ok(cookie_str) = cookie_header.to_str() {
+                    Cookies::parse(cookie_str)
+                } else {
+                    Cookies::new()
+                }
+            } else {
+                Cookies::new()
+            };
+            self.cookies = Some(cookies);
+        }
+        self.cookies.as_ref().unwrap()
     }
 
     /// Parse JSON body

@@ -57,6 +57,9 @@ async fn main() {
 - **🔗 Middleware:** Chain middleware like Express.js
 - **📦 Batteries-included:** JSON serialization, error handling, CORS built-in
 - **🎨 Ergonomic:** Result<T, E> maps to HTTP status codes automatically
+- **🍪 Cookie Support:** Parse and set HTTP cookies with ease
+- **📁 Static Files:** Serve static files from directories
+- **🎯 Route Groups:** Organize routes with common prefixes
 
 ## ⚠️ Production Readiness
 

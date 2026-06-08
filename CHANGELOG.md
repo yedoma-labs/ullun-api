@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Static file serving with `serve_static()`
+- Route groups with prefix support
+- Cookie parsing and setting
+- Request body size limits
+- Form data parsing (application/x-www-form-urlencoded)
+- Compression middleware (gzip, br)
+- Custom error handlers
+- Health check endpoint helper
+
+### Changed
+- Improved error messages
+- Better documentation
+
+### Fixed
+- Minor performance optimizations
+
 ## [0.1.0] - 2026-06-08
 
 ### Added

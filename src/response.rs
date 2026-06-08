@@ -1,5 +1,6 @@
 //! Response types and builders
 
+use crate::cookies::Cookie;
 use crate::error::Error;
 use bytes::Bytes;
 use http::StatusCode;
@@ -10,6 +11,7 @@ pub struct Response {
     pub status: StatusCode,
     pub headers: http::HeaderMap,
     pub body: Bytes,
+    cookies: Vec<Cookie>,
 }
 
 impl Response {
@@ -18,7 +20,14 @@ impl Response {
             status,
             headers: http::HeaderMap::new(),
             body: Bytes::new(),
+            cookies: Vec::new(),
         }
+    }
+
+    /// Set a cookie
+    pub fn cookie(mut self, cookie: Cookie) -> Self {
+        self.cookies.push(cookie);
+        self
     }
 
     pub fn ok() -> Self {
@@ -85,6 +94,11 @@ impl Response {
 
         for (key, value) in self.headers.iter() {
             builder = builder.header(key, value);
+        }
+
+        // Add Set-Cookie headers
+        for cookie in self.cookies {
+            builder = builder.header("set-cookie", cookie.to_header_value());
         }
 
         builder

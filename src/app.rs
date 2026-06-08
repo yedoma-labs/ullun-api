@@ -21,12 +21,40 @@ pub struct App {
     middlewares: Vec<Arc<dyn Middleware>>,
 }
 
+/// Route group builder
+pub struct RouteGroup {
+    prefix: String,
+    routes: Vec<(String, String, DynHandler)>, // (method, path, handler)
+    middlewares: Vec<Arc<dyn Middleware>>,
+}
+
 impl App {
     pub fn new() -> Self {
         Self {
             router: Router::new(),
             middlewares: Vec::new(),
         }
+    }
+
+    /// Create a route group with a common prefix
+    pub fn group(mut self, prefix: &str, configure: impl FnOnce(RouteGroup) -> RouteGroup) -> Self {
+        let group = RouteGroup::new(prefix);
+        let group = configure(group);
+        
+        // Register all routes with prefix
+        for (method, path, handler) in group.routes {
+            let full_path = format!("{}{}", group.prefix, path);
+            if let Err(e) = self.router.insert(&method, &full_path, handler) {
+                panic!("Failed to register {} route {}: {}", method, full_path, e);
+            }
+        }
+        
+        // Add group middlewares
+        for middleware in group.middlewares {
+            self.middlewares.push(middleware);
+        }
+        
+        self
     }
 
     /// Add GET route
@@ -124,6 +152,17 @@ impl App {
         self
     }
 
+    /// Serve static files from a directory
+    pub fn serve_static(mut self, route_prefix: &str, dir_path: &str) -> Self {
+        use crate::static_files::StaticFileHandler;
+        let handler = StaticFileHandler::new(dir_path);
+        let route = format!("{}{{filepath:.*}}", route_prefix);
+        if let Err(e) = self.router.insert("GET", &route, Arc::new(handler) as DynHandler) {
+            panic!("Failed to register static file route {}: {}", route, e);
+        }
+        self
+    }
+
     /// Run the server with graceful shutdown on CTRL+C
     pub async fn run(self, addr: &str) -> Result<()> {
         let addr: SocketAddr = addr
@@ -195,6 +234,65 @@ impl App {
 impl Default for App {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl RouteGroup {
+    fn new(prefix: &str) -> Self {
+        let prefix = prefix.trim_end_matches('/');
+        Self {
+            prefix: prefix.to_string(),
+            routes: Vec::new(),
+            middlewares: Vec::new(),
+        }
+    }
+
+    pub fn get<H>(mut self, path: &str, handler: H) -> Self
+    where
+        H: Handler,
+    {
+        self.routes.push(("GET".to_string(), path.to_string(), Arc::new(handler) as DynHandler));
+        self
+    }
+
+    pub fn post<H>(mut self, path: &str, handler: H) -> Self
+    where
+        H: Handler,
+    {
+        self.routes.push(("POST".to_string(), path.to_string(), Arc::new(handler) as DynHandler));
+        self
+    }
+
+    pub fn put<H>(mut self, path: &str, handler: H) -> Self
+    where
+        H: Handler,
+    {
+        self.routes.push(("PUT".to_string(), path.to_string(), Arc::new(handler) as DynHandler));
+        self
+    }
+
+    pub fn delete<H>(mut self, path: &str, handler: H) -> Self
+    where
+        H: Handler,
+    {
+        self.routes.push(("DELETE".to_string(), path.to_string(), Arc::new(handler) as DynHandler));
+        self
+    }
+
+    pub fn patch<H>(mut self, path: &str, handler: H) -> Self
+    where
+        H: Handler,
+    {
+        self.routes.push(("PATCH".to_string(), path.to_string(), Arc::new(handler) as DynHandler));
+        self
+    }
+
+    pub fn middleware<M>(mut self, middleware: M) -> Self
+    where
+        M: Middleware,
+    {
+        self.middlewares.push(Arc::new(middleware));
+        self
     }
 }
 

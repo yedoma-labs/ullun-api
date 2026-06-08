@@ -22,15 +22,18 @@
 //! ```
 
 pub mod app;
+pub mod cookies;
 pub mod error;
 pub mod handler;
 pub mod middleware;
 pub mod request;
 pub mod response;
 pub mod router;
+pub mod static_files;
 
 pub mod prelude {
-    pub use crate::app::App;
+    pub use crate::app::{App, RouteGroup};
+    pub use crate::cookies::{Cookie, Cookies};
     pub use crate::error::{Error, Result};
     pub use crate::handler::Handler;
     pub use crate::middleware::{Middleware, Next};
