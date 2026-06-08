@@ -57,9 +57,10 @@ impl App {
             }
         }
         
-        // Add group middlewares
-        for middleware in group.middlewares {
-            self.middlewares.push(middleware);
+        // Note: Group-level middlewares not yet supported - would apply globally
+        // Use route-specific middleware wrapping instead for now
+        if !group.middlewares.is_empty() {
+            eprintln!("Warning: RouteGroup.middleware() is not yet implemented. Middlewares will be ignored.");
         }
         
         self
@@ -219,7 +220,6 @@ impl App {
             let io = TokioIo::new(stream);
             let router = router.clone();
             let middlewares = middlewares.clone();
-            let max_body_size = max_body_size;
 
             tokio::task::spawn(async move {
                 if let Err(err) = http1::Builder::new()
@@ -228,7 +228,6 @@ impl App {
                         service_fn(|req| {
                             let router = router.clone();
                             let middlewares = middlewares.clone();
-                            let max_body_size = max_body_size;
                             async move {
                                 Ok::<_, Infallible>(
                                     handle_request(req, router, middlewares, max_body_size).await,
@@ -322,8 +321,9 @@ async fn handle_request(
     // Convert hyper request to our Request type
     let (parts, body) = req.into_parts();
 
-    // Check Content-Length against max_body_size
-    if let Some(max_size) = max_body_size {
+    // Enforce body size limit during streaming
+    let body_bytes = if let Some(max_size) = max_body_size {
+        // Check Content-Length header first (fast path)
         if let Some(content_length) = parts.headers.get(http::header::CONTENT_LENGTH) {
             if let Ok(length_str) = content_length.to_str() {
                 if let Ok(length) = length_str.parse::<usize>() {
@@ -337,11 +337,25 @@ async fn handle_request(
                 }
             }
         }
-    }
-
-    let body_bytes = match body.collect().await {
-        Ok(collected) => collected.to_bytes(),
-        Err(_) => bytes::Bytes::new(),
+        
+        // Limit actual stream reading (prevents bypass via chunked encoding)
+        let limited = http_body_util::Limited::new(body, max_size);
+        match limited.collect().await {
+            Ok(collected) => collected.to_bytes(),
+            Err(_) => {
+                // Body exceeded limit during reading
+                let error_response = Response::from_error(Error::custom(
+                    413,
+                    format!("Request body too large (max {} bytes)", max_size),
+                ));
+                return error_response.into_hyper();
+            }
+        }
+    } else {
+        match body.collect().await {
+            Ok(collected) => collected.to_bytes(),
+            Err(_) => bytes::Bytes::new(),
+        }
     };
 
     let mut request = Request::new(parts.method, parts.uri, parts.headers, body_bytes);

@@ -3,6 +3,7 @@
 use crate::cookies::Cookies;
 use crate::error::{Error, Result};
 use serde::de::DeserializeOwned;
+use std::cell::OnceCell;
 use std::collections::HashMap;
 
 /// Path parameters extracted from route
@@ -92,7 +93,7 @@ pub struct Request {
     pub body: bytes::Bytes,
     pub params: Params,
     pub query: Query,
-    cookies: Option<Cookies>,
+    cookies: OnceCell<Cookies>,
 }
 
 impl Request {
@@ -114,14 +115,14 @@ impl Request {
             body,
             params: Params::new(),
             query,
-            cookies: None,
+            cookies: OnceCell::new(),
         }
     }
 
     /// Get cookies from the request
-    pub fn cookies(&mut self) -> &Cookies {
-        if self.cookies.is_none() {
-            let cookies = if let Some(cookie_header) = self.headers.get("cookie") {
+    pub fn cookies(&self) -> &Cookies {
+        self.cookies.get_or_init(|| {
+            if let Some(cookie_header) = self.headers.get("cookie") {
                 if let Ok(cookie_str) = cookie_header.to_str() {
                     Cookies::parse(cookie_str)
                 } else {
@@ -129,10 +130,8 @@ impl Request {
                 }
             } else {
                 Cookies::new()
-            };
-            self.cookies = Some(cookies);
-        }
-        self.cookies.as_ref().unwrap()
+            }
+        })
     }
 
     /// Parse JSON body

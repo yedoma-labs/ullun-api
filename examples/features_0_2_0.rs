@@ -14,6 +14,8 @@ async fn main() {
     std::fs::write("static/style.css", "body { font-family: sans-serif; }").ok();
 
     App::new()
+        // Set max request body size to 5 MB
+        .max_body_size(Some(5 * 1024 * 1024))
         // Serve static files
         .serve_static("/static/", "static")
         // Home route
@@ -48,7 +50,7 @@ async fn main() {
                     }))
                     .cookie(session_cookie))
                 })
-                .get("/profile", |mut req: Request| async move {
+                .get("/profile", |req: Request| async move {
                     // Check for session cookie
                     let cookies = req.cookies();
                     if let Some(session) = cookies.get("session") {
@@ -81,7 +83,7 @@ async fn main() {
 
             Ok(Response::text("Cookie set!").cookie(cookie))
         })
-        .get("/get-cookie", |mut req: Request| async move {
+        .get("/get-cookie", |req: Request| async move {
             let cookies = req.cookies();
             if let Some(demo) = cookies.get("demo") {
                 Ok(Response::text(format!("Cookie value: {}", demo)))

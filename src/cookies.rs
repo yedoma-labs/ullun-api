@@ -26,9 +26,20 @@ pub enum SameSite {
 impl Cookie {
     /// Create a new cookie
     pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
+        let name = name.into();
+        let value = value.into();
+        
+        // Validate cookie name and value to prevent injection
+        if name.contains(|c: char| c == ';' || c == '=' || c.is_control()) {
+            panic!("Invalid cookie name: contains forbidden characters");
+        }
+        if value.contains(|c: char| c == ';' || c.is_control()) {
+            panic!("Invalid cookie value: contains forbidden characters");
+        }
+        
         Self {
-            name: name.into(),
-            value: value.into(),
+            name,
+            value,
             domain: None,
             path: Some("/".to_string()),
             max_age: None,
@@ -70,6 +81,10 @@ impl Cookie {
 
     /// Set SameSite attribute
     pub fn same_site(mut self, same_site: SameSite) -> Self {
+        // SameSite=None requires Secure flag per RFC 6265bis
+        if same_site == SameSite::None {
+            self.secure = true;
+        }
         self.same_site = Some(same_site);
         self
     }

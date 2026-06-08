@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.0] - TBD
+## [0.2.0] - 2026-06-08
 
 ### Added
 - **Route groups:** Organize routes with common prefixes using `App::group()`
@@ -48,5 +48,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ~150KB compiled binary size
 - Zero unsafe code
 
-[Unreleased]: https://github.com/yedoma-labs/ullun-api/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/yedoma-labs/ullun-api/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/yedoma-labs/ullun-api/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/yedoma-labs/ullun-api/releases/tag/v0.1.0

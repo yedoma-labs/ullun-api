@@ -29,11 +29,7 @@ impl StaticFileHandler {
             .await
             .map_err(|_| Error::not_found("Static directory not found"))?;
 
-        // Check if file exists first
-        if !full_path.exists() {
-            return Err(Error::not_found("File not found"));
-        }
-
+        // Canonicalize and validate path (prevents TOCTOU race)
         let canonical_path = fs::canonicalize(&full_path)
             .await
             .map_err(|_| Error::not_found("File not found"))?;

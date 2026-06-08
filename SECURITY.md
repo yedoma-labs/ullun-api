@@ -164,7 +164,7 @@ We will:
 
 1. **No built-in authentication** - Implement in middleware
 2. **No rate limiting** - Use reverse proxy or custom middleware
-3. **No request size limits** - Configure at reverse proxy level
+3. **Request size limits configurable** - Default 10MB, configure with `max_body_size()` (v0.2.0+)
 4. **Basic CORS implementation** - Production should use more sophisticated origin checking
 5. **No built-in CSRF protection** - Must implement manually
 

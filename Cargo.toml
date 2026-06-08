@@ -1,6 +1,6 @@
 [package]
 name = "ullun-api"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["yedoma-labs"]
 description = "Express.js-inspired web framework for Rust - simple, fast, batteries-included"
