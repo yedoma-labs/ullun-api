@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.4](https://github.com/yedoma-labs/ullun-api/compare/v0.4.3...v0.4.4) - 2026-10-20
+
+### Added
+
+- *(cors)* add Cors middleware and SecurityHeaders with CSP nonces
+
 ## [0.4.3](https://github.com/yedoma-labs/ullun-api/compare/v0.4.2...v0.4.3) - 2026-10-20
 
 ### Added
