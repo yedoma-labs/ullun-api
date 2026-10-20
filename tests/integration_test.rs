@@ -66,3 +66,18 @@ fn test_body_size_limits() {
     // Test unlimited
     let _app = App::new().max_body_size(None);
 }
+
+#[test]
+fn test_html_and_redirect_helpers() {
+    let html = Response::html("<p>hi</p>");
+    assert_eq!(html.status, http::StatusCode::OK);
+    assert_eq!(html.headers["content-type"], "text/html; charset=utf-8");
+    assert_eq!(&html.body[..], b"<p>hi</p>");
+
+    let see_other = Response::redirect("/next");
+    assert_eq!(see_other.status, http::StatusCode::SEE_OTHER);
+    assert_eq!(see_other.headers["location"], "/next");
+
+    let permanent = Response::redirect_permanent("/new");
+    assert_eq!(permanent.status, http::StatusCode::PERMANENT_REDIRECT);
+}

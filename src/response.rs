@@ -75,6 +75,23 @@ impl Response {
             .with_body(text.into())
     }
 
+    /// `200 OK` with an HTML body
+    pub fn html(html: impl Into<String>) -> Self {
+        Self::ok()
+            .with_header("content-type", "text/html; charset=utf-8")
+            .with_body(html.into())
+    }
+
+    /// `303 See Other`, the right answer after a form POST (Post/Redirect/Get)
+    pub fn redirect(location: impl Into<String>) -> Self {
+        Self::new(StatusCode::SEE_OTHER).with_header("location", location)
+    }
+
+    /// `308 Permanent Redirect`, keeps method and body
+    pub fn redirect_permanent(location: impl Into<String>) -> Self {
+        Self::new(StatusCode::PERMANENT_REDIRECT).with_header("location", location)
+    }
+
     pub fn from_error(error: Error) -> Self {
         let status =
             StatusCode::from_u16(error.status_code()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
