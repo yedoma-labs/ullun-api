@@ -755,6 +755,9 @@ cargo test
 # Run benchmarks (micro + end-to-end HTTP)
 cargo bench
 
+# Compare against axum and actix-web on your machine (portable, Markdown/JSON report)
+scripts/bench.sh --quick
+
 # Check coverage
 cargo tarpaulin --out Html
 ```

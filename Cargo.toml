@@ -18,6 +18,8 @@ exclude = [
     "release-plz.toml",
     "Dockerfile",
     "target/*",
+    "bench/*",
+    "scripts/*",
 ]
 
 [features]
