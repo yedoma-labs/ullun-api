@@ -51,6 +51,8 @@
 
 **Server-side requests (SSRF)** - If your service fetches URLs that users or admins provide, use `ullun::security::resolve_public`: it requires every DNS answer to be a public address (loopback, private, link-local, CGNAT, multicast, documentation and IPv6 forms that embed IPv4 are refused) and returns the address to connect to, so check and use cannot diverge. `examples/statuspage` and `examples/webhooks` do this on every request.
 
+**TLS** - With the `tls` feature the server speaks HTTPS itself (`App::tls`): TLS 1.2/1.3 only, certificate hot-reload that keeps the old certificate when a renewal is broken, handshake timeout, optional or required client certificates (`TlsConfig::client_auth`). A client certificate proves membership of your CA, not authorization: check its fingerprint or subject in the handler (see `examples/secure_api`). Add `secure::Hsts`, and redirect plain HTTP with `secure::RequireHttps` (the redirect target is built from a strictly validated `Host`; set `allowed_hosts` in production). Behind a reverse proxy, believe `X-Forwarded-Proto` only if the proxy sets it.
+
 **Rate Limiting** - `RateLimiter` middleware (per instance, in memory)
 - Keyed by peer IP by default; `trust_forwarded_for()` only behind your own reverse proxy
 - Use the reverse proxy (nginx, Caddy) or a shared store for limits across instances

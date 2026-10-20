@@ -117,6 +117,7 @@ Optional features (everything else is always on):
 | `jwt` | `ullun::jwt` - HS256 tokens, `JwtAuth` middleware | `hmac`, `sha2`, `base64` |
 | `compression` | `ullun::compression::Compression` - gzip middleware | `flate2` |
 | `websocket` | `App::ws`, `ullun::websocket` | `tokio-tungstenite`, `futures-util` |
+| `tls` | `App::tls`, `ullun::tls` - HTTPS, certificate reload, client certificates | `tokio-rustls` (rustls + ring) |
 | `full` | all of the above | |
 
 ```toml
@@ -286,6 +287,30 @@ let session_id = random_token(16)?;                // 128 bits from the OS CSPRN
 let short_code = random_alphanumeric(7)?;          // uniform [A-Za-z0-9]
 let ok = constant_time_eq(given.as_bytes(), expected.as_bytes());   // for API keys, delete tokens, ...
 ```
+
+### HTTPS (feature `tls`)
+
+```rust
+let tls = TlsConfig::from_pem_files("fullchain.pem", "privkey.pem")?
+    .client_auth(&std::fs::read("clients-ca.pem")?, false)?;   // optional mutual TLS
+
+App::new()
+    .middleware(Hsts::new())                                    // Strict-Transport-Security on secure requests
+    .get("/admin", |req: Request| async move {
+        let cert = req.client_certificate().ok_or_else(|| Error::unauthorized("client certificate required"))?;
+        // verified against your CA already; decide whether *this* certificate may do this (fingerprint allow-list)
+        Ok(Response::text("ok"))
+    })
+    .tls(tls)
+    .tls_reload_every(Duration::from_secs(3600))                // renewed certificates are picked up, no restart
+    .run("0.0.0.0:8443")
+    .await?;
+
+// port 80: only redirect
+App::new().middleware(RequireHttps::new().https_port(8443)).run("0.0.0.0:8080").await?;
+```
+
+TLS 1.2/1.3 via rustls (ring), handshakes with a timeout, a broken renewal keeps the old certificate in service, WebSockets work as `wss`. `req.is_secure()` tells handlers how the request arrived; behind a TLS-terminating proxy use `trust_forwarded_proto()` on `RequireHttps` / `Hsts` (only if the proxy overwrites `X-Forwarded-Proto`).
 
 ### Background jobs
 
@@ -665,6 +690,7 @@ Complete services that run as they are and are covered by integration tests (`te
 | [`shortener`](examples/shortener) | `cargo run --example shortener` | URL shortener: API-key management API, public redirects, click counting, expiry, per-key rate limit, JSON file persistence, OpenAPI |
 | [`taskboard`](examples/taskboard) (`jwt`) | `DEV=1 cargo run --example taskboard --features jwt` | REST API: registration/login (argon2 + JWT), per-user projects and tasks, 422 field errors, filter/sort/pagination, ETag + If-Match, login throttling, OpenAPI + Swagger UI |
 | [`statuspage`](examples/statuspage) | `DEV=1 cargo run --example statuspage` | Uptime monitor: background scheduler, HTTP/TCP checks with SSRF protection, public status page with live Server-Sent Events, admin API, graceful SIGTERM shutdown |
+| [`secure_api`](examples/secure_api) (`tls`) | `DEV=1 cargo run --example secure_api --features tls` | HTTPS service: self-renewing certificates, HTTP->HTTPS redirect listener, HSTS, mutual-TLS admin routes with a fingerprint allow-list |
 | [`webhooks`](examples/webhooks) | `DEV=1 cargo run --example webhooks` | Outgoing webhooks: signed deliveries, retries with backoff and Retry-After, dead letters, endpoint auto-disable, idempotent publishing, SSRF-safe targets, persistence |
 | [`chat`](examples/chat) (`websocket`, `jwt`) | `DEV=1 cargo run --example chat --features websocket,jwt` | Chat rooms over WebSockets: one-time tickets instead of tokens in URLs, history, presence, rate limits, connection limits, graceful close |
 | [`gateway`](examples/gateway) | `DEV=1 cargo run --example gateway` | Reverse proxy: prefix routing, round-robin, failover for idempotent requests, passive health checks, 502/504, streaming relay, forwarded headers, traversal-proof paths, access log + metrics |
