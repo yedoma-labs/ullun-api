@@ -43,6 +43,7 @@ pub mod error;
 pub mod files;
 pub mod handler;
 pub mod hub;
+pub mod jobs;
 #[cfg(feature = "jwt")]
 pub mod jwt;
 pub mod middleware;
