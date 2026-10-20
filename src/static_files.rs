@@ -1,13 +1,19 @@
 //! Static file serving
 
 use crate::error::{Error, Result};
+use crate::files::{serve_file, FileOptions};
 use crate::handler::Handler;
 use crate::request::Request;
 use crate::response::Response;
 use async_trait::async_trait;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tokio::fs;
 
+/// Serves a directory: files, `index.html` for directories, ranges, conditional
+/// requests and streaming for large files (see [`crate::files`]).
+///
+/// Dotfiles (`.env`, `.git/`, ...) are never served, and requests that try to
+/// leave the directory (`..`, absolute paths, symlinks pointing outside) get `404`.
 pub struct StaticFileHandler {
     root_dir: PathBuf,
 }
@@ -19,112 +25,83 @@ impl StaticFileHandler {
         }
     }
 
-    async fn serve_file(&self, file_path: &str) -> Result<Response> {
-        // Sanitize path to prevent directory traversal
-        let file_path = file_path.trim_start_matches('/');
-        let full_path = self.root_dir.join(file_path);
+    async fn serve(&self, req: &Request, file_path: &str) -> Result<Response> {
+        let not_found = || Error::not_found("File not found");
 
-        // Ensure the path is within root_dir
+        // %20 etc. in file names; decoded before validating, so %2e%2e is caught too
+        let decoded = urlencoding::decode(file_path).map_err(|_| not_found())?;
+        let mut relative = PathBuf::new();
+        for segment in decoded.split('/').filter(|s| !s.is_empty()) {
+            let unsafe_segment = segment.starts_with('.')
+                || segment.contains(['\\', '\0', ':'])
+                || segment.chars().any(char::is_control);
+            if unsafe_segment {
+                return Err(not_found());
+            }
+            relative.push(segment);
+        }
+
         let canonical_root = fs::canonicalize(&self.root_dir)
             .await
             .map_err(|_| Error::not_found("Static directory not found"))?;
-
-        // Canonicalize and validate path (prevents TOCTOU race)
-        let canonical_path = fs::canonicalize(&full_path)
+        let mut canonical = fs::canonicalize(canonical_root.join(&relative))
             .await
-            .map_err(|_| Error::not_found("File not found"))?;
-
-        if !canonical_path.starts_with(&canonical_root) {
-            // 404 instead of 403: do not reveal whether the target exists
-            return Err(Error::not_found("File not found"));
+            .map_err(|_| not_found())?;
+        // 404 rather than 403: do not reveal whether the target exists
+        if !canonical.starts_with(&canonical_root) {
+            return Err(not_found());
         }
 
-        // Check if it's a directory
-        let metadata = fs::metadata(&canonical_path)
-            .await
-            .map_err(|_| Error::not_found("File not found"))?;
-
-        if metadata.is_dir() {
-            // Try to serve index.html
-            let index_path = canonical_path.join("index.html");
-            if fs::metadata(&index_path).await.is_ok() {
-                return self.serve_file_content(&index_path).await;
+        let meta = fs::metadata(&canonical).await.map_err(|_| not_found())?;
+        if meta.is_dir() {
+            let index = canonical.join("index.html");
+            if fs::metadata(&index).await.is_ok_and(|m| m.is_file()) {
+                canonical = index;
+            } else {
+                return Err(Error::forbidden("Directory listing not allowed"));
             }
-            return Err(Error::forbidden("Directory listing not allowed"));
         }
 
-        self.serve_file_content(&canonical_path).await
-    }
-
-    async fn serve_file_content(&self, path: &Path) -> Result<Response> {
-        let content = fs::read(path)
-            .await
-            .map_err(|_| Error::internal("Failed to read file"))?;
-
-        let content_type = guess_content_type(path);
-
-        Ok(Response::new(http::StatusCode::OK)
-            .with_header("content-type", content_type)
-            .with_header("cache-control", "public, max-age=3600")
-            .with_body(content))
+        serve_file(
+            req,
+            &canonical,
+            &FileOptions::new().cache_control("public, max-age=3600"),
+        )
+        .await
     }
 }
 
 #[async_trait]
 impl Handler for StaticFileHandler {
     async fn call(&self, req: Request) -> Result<Response> {
-        let filepath = req.params.get("filepath").unwrap_or("");
-        self.serve_file(filepath).await
-    }
-}
-
-fn guess_content_type(path: &Path) -> &'static str {
-    match path.extension().and_then(|e| e.to_str()) {
-        Some("html") => "text/html; charset=utf-8",
-        Some("css") => "text/css; charset=utf-8",
-        Some("js") => "application/javascript; charset=utf-8",
-        Some("json") => "application/json",
-        Some("png") => "image/png",
-        Some("jpg") | Some("jpeg") => "image/jpeg",
-        Some("gif") => "image/gif",
-        Some("svg") => "image/svg+xml",
-        Some("ico") => "image/x-icon",
-        Some("woff") => "font/woff",
-        Some("woff2") => "font/woff2",
-        Some("ttf") => "font/ttf",
-        Some("txt") => "text/plain; charset=utf-8",
-        Some("xml") => "application/xml",
-        Some("pdf") => "application/pdf",
-        Some("zip") => "application/zip",
-        _ => "application/octet-stream",
+        let filepath = req.params.get("filepath").unwrap_or("").to_string();
+        self.serve(&req, &filepath).await
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::files::content_type_for;
+    use std::path::Path;
 
     #[test]
     fn test_content_type_detection() {
         assert_eq!(
-            guess_content_type(Path::new("test.html")),
+            content_type_for(Path::new("test.html")),
             "text/html; charset=utf-8"
         );
         assert_eq!(
-            guess_content_type(Path::new("test.css")),
+            content_type_for(Path::new("test.css")),
             "text/css; charset=utf-8"
         );
         assert_eq!(
-            guess_content_type(Path::new("test.js")),
+            content_type_for(Path::new("test.js")),
             "application/javascript; charset=utf-8"
         );
+        assert_eq!(content_type_for(Path::new("test.json")), "application/json");
+        assert_eq!(content_type_for(Path::new("test.png")), "image/png");
         assert_eq!(
-            guess_content_type(Path::new("test.json")),
-            "application/json"
-        );
-        assert_eq!(guess_content_type(Path::new("test.png")), "image/png");
-        assert_eq!(
-            guess_content_type(Path::new("unknown")),
+            content_type_for(Path::new("unknown")),
             "application/octet-stream"
         );
     }
