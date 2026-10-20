@@ -375,18 +375,24 @@ async fn history_is_capped_and_ids_increase() {
     let s = server(config()).await;
     let mut alice = join(&s, "alice", "cap").await;
     expect_type(&mut alice, "welcome").await;
-    for i in 0..105 {
-        say(&mut alice, &format!("m{i}")).await;
-    }
+    // in batches that fit the hub's per-room buffer: flooding it faster than the
+    // socket drains would (correctly) make the sender miss messages
     let mut last = 0;
-    let mut seen = 0;
-    while seen < 105 {
-        let v = next(&mut alice).await;
-        if v["type"] == "message" {
-            let id = v["id"].as_u64().unwrap();
-            assert!(id > last);
-            last = id;
-            seen += 1;
+    for batch in 0..7 {
+        let range = (batch * 15)..((batch + 1) * 15).min(105);
+        let count = range.len();
+        for i in range {
+            say(&mut alice, &format!("m{i}")).await;
+        }
+        let mut seen = 0;
+        while seen < count {
+            let v = next(&mut alice).await;
+            if v["type"] == "message" {
+                let id = v["id"].as_u64().unwrap();
+                assert!(id > last);
+                last = id;
+                seen += 1;
+            }
         }
     }
     let token = login(&s, "alice").await;
