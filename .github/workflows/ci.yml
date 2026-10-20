@@ -60,6 +60,7 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy --all-targets --all-features -- -D warnings
 
   docs:
     name: Rustdoc
@@ -70,7 +71,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo doc --no-deps
+      - run: cargo doc --no-deps --all-features
 
   security-audit:
     name: Security Audit
@@ -97,7 +98,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --all-targets --verbose
-      - run: cargo test --doc --verbose
+      - run: cargo test --all-targets --all-features --verbose
+      - run: cargo test --doc --all-features --verbose
 
   # ---- Build: release profile, all examples, benches compile ----
   build:
@@ -107,8 +109,8 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release --examples --verbose
-      - run: cargo bench --no-run
+      - run: cargo build --release --examples --all-features --verbose
+      - run: cargo bench --no-run --all-features
 
   coverage:
     name: Code Coverage
@@ -120,7 +122,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-tarpaulin
-      - run: cargo tarpaulin --verbose --workspace --timeout 300 --out Xml
+      - run: cargo tarpaulin --verbose --workspace --all-features --timeout 300 --out Xml
       - uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
