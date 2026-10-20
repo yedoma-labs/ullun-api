@@ -287,6 +287,36 @@ let short_code = random_alphanumeric(7)?;          // uniform [A-Za-z0-9]
 let ok = constant_time_eq(given.as_bytes(), expected.as_bytes());   // for API keys, delete tokens, ...
 ```
 
+### Background jobs
+
+```rust
+let queue: JobQueue<SendMail> = JobQueue::new(QueueConfig::new().max_attempts(5).persist_to("queue.json"));
+let worker = queue.clone();
+
+App::new()
+    .state(queue)
+    .post("/signup", |req: Request| async move {
+        req.state::<JobQueue<SendMail>>()?.enqueue(SendMail { to: "ann@example.com".into() });
+        Ok(Response::text("welcome"))                          // answered at once, mail goes out later
+    })
+    .background(move |ctx: Context| async move {
+        worker.run(ctx.shutdown(), 4, |job| async move {
+            deliver(&job.payload).await.map_err(|e| JobError::retry(e.to_string()))   // or retry_after / fatal
+        }).await;
+    })
+```
+
+Exponential backoff with jitter, a dead-letter list (`dead_jobs`, `retry_dead`, `delete_dead`), delayed jobs and de-duplication keys (`enqueue_with`), panics counted as failed attempts, and a clean stop that lets running jobs finish. Delivery is **at-least-once** (a job interrupted by a crash runs again), so handlers must be safe to repeat.
+
+### Safe outgoing requests
+
+```rust
+let addr = resolve_public(host, port, false).await?;   // every DNS answer must be a public address
+let stream = TcpStream::connect(addr).await?;          // connect to the vetted address, not to the name again
+```
+
+`ullun::security::resolve_public` / `is_public_ip` keep user-supplied URLs from reaching loopback, private networks, cloud metadata endpoints or addresses that merely embed them (IPv4-mapped, NAT64, 6to4), and cannot be redirected by DNS rebinding.
+
 ### Rooms (publish/subscribe)
 
 ```rust
@@ -635,6 +665,7 @@ Complete services that run as they are and are covered by integration tests (`te
 | [`shortener`](examples/shortener) | `cargo run --example shortener` | URL shortener: API-key management API, public redirects, click counting, expiry, per-key rate limit, JSON file persistence, OpenAPI |
 | [`taskboard`](examples/taskboard) (`jwt`) | `DEV=1 cargo run --example taskboard --features jwt` | REST API: registration/login (argon2 + JWT), per-user projects and tasks, 422 field errors, filter/sort/pagination, ETag + If-Match, login throttling, OpenAPI + Swagger UI |
 | [`statuspage`](examples/statuspage) | `DEV=1 cargo run --example statuspage` | Uptime monitor: background scheduler, HTTP/TCP checks with SSRF protection, public status page with live Server-Sent Events, admin API, graceful SIGTERM shutdown |
+| [`webhooks`](examples/webhooks) | `DEV=1 cargo run --example webhooks` | Outgoing webhooks: signed deliveries, retries with backoff and Retry-After, dead letters, endpoint auto-disable, idempotent publishing, SSRF-safe targets, persistence |
 | [`chat`](examples/chat) (`websocket`, `jwt`) | `DEV=1 cargo run --example chat --features websocket,jwt` | Chat rooms over WebSockets: one-time tickets instead of tokens in URLs, history, presence, rate limits, connection limits, graceful close |
 | [`gateway`](examples/gateway) | `DEV=1 cargo run --example gateway` | Reverse proxy: prefix routing, round-robin, failover for idempotent requests, passive health checks, 502/504, streaming relay, forwarded headers, traversal-proof paths, access log + metrics |
 | [`blog`](examples/blog) | `DEV=1 cargo run --example blog` | Blog/CMS: Markdown posts (escaped HTML, safe links), admin login with argon2, sessions renewed on login, CSRF on every form, throttled login, strict CSP, RSS and sitemap, drafts, ETags |
