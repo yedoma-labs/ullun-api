@@ -94,6 +94,7 @@ pub struct Operation {
     operation_id: Option<String>,
     deprecated: bool,
     secured: bool,
+    api_key_headers: Vec<String>,
     parameters: Vec<Value>,
     request_body: Option<Value>,
     responses: BTreeMap<u16, Value>,
@@ -130,6 +131,15 @@ impl Operation {
     /// Requires a bearer token (`Authorization: Bearer ...`)
     pub fn secured(mut self) -> Self {
         self.secured = true;
+        self
+    }
+
+    /// Requires an API key in the given header (e.g. `x-api-key`)
+    pub fn secured_by_api_key(mut self, header: impl Into<String>) -> Self {
+        let header = header.into();
+        if !self.api_key_headers.contains(&header) {
+            self.api_key_headers.push(header);
+        }
         self
     }
 
@@ -269,6 +279,10 @@ pub(crate) struct RouteInfo {
     pub kind: RouteKind,
 }
 
+fn api_key_scheme(header: &str) -> String {
+    format!("apiKey_{}", header.replace('-', "_"))
+}
+
 /// `{*rest}` catch-alls become plain `{rest}`; returns the parameter names
 fn openapi_path(path: &str) -> (String, Vec<String>) {
     let mut out = String::new();
@@ -297,6 +311,7 @@ pub(crate) fn build(
 ) -> Value {
     let mut paths: BTreeMap<String, Map<String, Value>> = BTreeMap::new();
     let mut uses_bearer = false;
+    let mut api_key_headers: Vec<String> = Vec::new();
 
     for route in routes.iter().filter(|r| r.kind != RouteKind::Hidden) {
         let (doc_path, names) = openapi_path(&route.path);
@@ -319,9 +334,20 @@ pub(crate) fn build(
             if op.deprecated {
                 operation.insert("deprecated".into(), json!(true));
             }
+            // alternatives: any one of the listed schemes is enough
+            let mut security: Vec<Value> = Vec::new();
             if op.secured {
                 uses_bearer = true;
-                operation.insert("security".into(), json!([{ "bearerAuth": [] }]));
+                security.push(json!({ "bearerAuth": [] }));
+            }
+            for header in &op.api_key_headers {
+                if !api_key_headers.contains(header) {
+                    api_key_headers.push(header.clone());
+                }
+                security.push(json!({ api_key_scheme(header): [] }));
+            }
+            if !security.is_empty() {
+                operation.insert("security".into(), Value::Array(security));
             }
         }
 
@@ -382,9 +408,21 @@ pub(crate) fn build(
             }
         }
     });
+    let mut schemes = Map::new();
     if uses_bearer {
-        components["securitySchemes"] =
-            json!({ "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT" } });
+        schemes.insert(
+            "bearerAuth".into(),
+            json!({ "type": "http", "scheme": "bearer", "bearerFormat": "JWT" }),
+        );
+    }
+    for header in &api_key_headers {
+        schemes.insert(
+            api_key_scheme(header),
+            json!({ "type": "apiKey", "in": "header", "name": header }),
+        );
+    }
+    if !schemes.is_empty() {
+        components["securitySchemes"] = Value::Object(schemes);
     }
 
     let mut doc = json!({
@@ -542,6 +580,41 @@ mod tests {
         );
         assert_eq!(doc["servers"][0]["url"], "https://api.example.com");
         assert_eq!(doc["info"]["description"], "d");
+    }
+
+    #[test]
+    fn api_key_and_bearer_schemes_are_listed_as_alternatives() {
+        let routes = vec![
+            route("GET", "/a", RouteKind::Http),
+            route("GET", "/b", RouteKind::Http),
+        ];
+        let mut docs = HashMap::new();
+        docs.insert(
+            ("GET".into(), "/a".into()),
+            Operation::new("a").secured_by_api_key("x-api-key"),
+        );
+        docs.insert(
+            ("GET".into(), "/b".into()),
+            Operation::new("b")
+                .secured()
+                .secured_by_api_key("x-api-key")
+                .secured_by_api_key("x-api-key"),
+        );
+        let doc = build(&OpenApiInfo::new("T", "1"), &routes, &docs);
+        assert_eq!(
+            doc["paths"]["/a"]["get"]["security"],
+            json!([{ "apiKey_x_api_key": [] }])
+        );
+        assert_eq!(
+            doc["paths"]["/b"]["get"]["security"],
+            json!([{ "bearerAuth": [] }, { "apiKey_x_api_key": [] }])
+        );
+        let schemes = &doc["components"]["securitySchemes"];
+        assert_eq!(
+            schemes["apiKey_x_api_key"],
+            json!({ "type": "apiKey", "in": "header", "name": "x-api-key" })
+        );
+        assert_eq!(schemes["bearerAuth"]["scheme"], "bearer");
     }
 
     #[test]
