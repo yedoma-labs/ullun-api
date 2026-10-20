@@ -13,7 +13,7 @@
 //! | `{{{ html }}}` or `{{& html }}` | value, **not** escaped |
 //! | `{{#if x}}..{{else}}..{{/if}}` | conditional; falsy: missing, `null`, `false`, `0`, `""`, `[]`, `{}` |
 //! | `{{#unless x}}..{{/unless}}` | inverted conditional |
-//! | `{{#each items}}..{{/each}}` | loop; `{{this}}`, `{{@index}}`, `{{@first}}`, `{{@last}}`, `{{@key}}` (objects) |
+//! | `{{#each items}}..{{else}}..{{/each}}` | loop; `{{this}}`, `{{@index}}`, `{{@first}}`, `{{@last}}`, `{{@key}}` (objects); the `else` part renders for a missing or empty list |
 //! | `{{> partial.html}}` | include another template with the current context |
 //! | `{{! comment }}` | ignored |
 //!
@@ -66,6 +66,7 @@ enum Node {
     Each {
         path: String,
         body: Vec<Node>,
+        otherwise: Vec<Node>,
     },
     Partial(String),
 }
@@ -206,12 +207,16 @@ impl Templates {
                     let branch = if truthy != *negate { then } else { otherwise };
                     self.render_list(branch, scope, out, depth)?;
                 }
-                Node::Each { path, body } => {
+                Node::Each {
+                    path,
+                    body,
+                    otherwise,
+                } => {
                     // The looked-up value borrows from the render context ('a),
                     // not from the scope stack, so it can be pushed as a frame.
                     let items = lookup(path, scope);
                     match items {
-                        Some(Value::Array(list)) => {
+                        Some(Value::Array(list)) if !list.is_empty() => {
                             for (i, item) in list.iter().enumerate() {
                                 scope.push(Frame {
                                     value: item,
@@ -224,7 +229,7 @@ impl Templates {
                                 r?;
                             }
                         }
-                        Some(Value::Object(map)) => {
+                        Some(Value::Object(map)) if !map.is_empty() => {
                             let len = map.len();
                             for (i, (k, v)) in map.iter().enumerate() {
                                 scope.push(Frame {
@@ -238,7 +243,7 @@ impl Templates {
                                 r?;
                             }
                         }
-                        _ => {}
+                        _ => self.render_list(otherwise, scope, out, depth)?,
                     }
                 }
                 Node::Partial(name) => {
@@ -335,6 +340,8 @@ fn parse(source: &str) -> std::result::Result<Vec<Node>, String> {
         },
         Each {
             path: String,
+            in_else: bool,
+            then: Vec<Node>,
         },
     }
     // (kind, nodes collected for the open block's current branch)
@@ -396,6 +403,8 @@ fn parse(source: &str) -> std::result::Result<Vec<Node>, String> {
             stack.push((
                 Open::Each {
                     path: path.trim().to_string(),
+                    in_else: false,
+                    then: Vec::new(),
                 },
                 std::mem::take(&mut current),
             ));
@@ -405,7 +414,11 @@ fn parse(source: &str) -> std::result::Result<Vec<Node>, String> {
                     *then = std::mem::take(&mut current);
                     *in_else = true;
                 }
-                _ => return Err("'{{else}}' outside of #if/#unless".into()),
+                Some((Open::Each { then, in_else, .. }, _)) if !*in_else => {
+                    *then = std::mem::take(&mut current);
+                    *in_else = true;
+                }
+                _ => return Err("'{{else}}' outside of #if/#unless/#each, or used twice".into()),
             }
         } else if tag == "/if" || tag == "/unless" || tag == "/each" {
             let (open, parent) = stack
@@ -436,7 +449,28 @@ fn parse(source: &str) -> std::result::Result<Vec<Node>, String> {
                         otherwise,
                     }
                 }
-                (Open::Each { path }, "/each") => Node::Each { path, body },
+                (
+                    Open::Each {
+                        path,
+                        in_else,
+                        then,
+                    },
+                    "/each",
+                ) => {
+                    if in_else {
+                        Node::Each {
+                            path,
+                            body: then,
+                            otherwise: body,
+                        }
+                    } else {
+                        Node::Each {
+                            path,
+                            body,
+                            otherwise: Vec::new(),
+                        }
+                    }
+                }
                 _ => return Err(format!("mismatched closing tag '{{{{{}}}}}'", tag)),
             };
             current.push(node);
@@ -515,6 +549,31 @@ mod tests {
             "[1][a]"
         );
         assert_eq!(render("{{#each l}}x{{/each}}", json!({ "l": [] })), "");
+    }
+
+    #[test]
+    fn each_else_renders_for_missing_or_empty_lists() {
+        let t = "{{#each l}}[{{this}}]{{else}}nothing{{/each}}";
+        assert_eq!(render(t, json!({ "l": [1, 2] })), "[1][2]");
+        assert_eq!(render(t, json!({ "l": [] })), "nothing");
+        assert_eq!(render(t, json!({})), "nothing");
+        assert_eq!(render(t, json!({ "l": {} })), "nothing");
+        assert_eq!(render(t, json!({ "l": { "a": 1 } })), "[1]");
+        // nested: the inner else belongs to the inner loop
+        let nested =
+            "{{#each rows}}{{#each cells}}{{this}}{{else}}-{{/each}};{{else}}no rows{{/each}}";
+        assert_eq!(
+            render(
+                nested,
+                json!({ "rows": [{ "cells": [1, 2] }, { "cells": [] }] })
+            ),
+            "12;-;"
+        );
+        assert_eq!(render(nested, json!({ "rows": [] })), "no rows");
+        // a second else is an error
+        assert!(Templates::new()
+            .add("x", "{{#each a}}1{{else}}2{{else}}3{{/each}}")
+            .is_err());
     }
 
     #[test]
