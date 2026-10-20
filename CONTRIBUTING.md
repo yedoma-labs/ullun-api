@@ -30,8 +30,9 @@ cargo build
 ### Running Tests
 
 ```bash
-# Run all tests
+# Run all tests (default features, then everything)
 cargo test
+cargo test --all-features
 
 # Run specific test
 cargo test test_name
@@ -60,7 +61,7 @@ curl http://localhost:3000/hello/world
 ## Code Style
 
 - Follow Rust standard style (`cargo fmt`)
-- Run clippy: `cargo clippy -- -D warnings`
+- Run clippy: `cargo clippy --all-targets --all-features -- -D warnings` (CI also runs it with default features)
 - Document public APIs with `///` comments
 - Keep functions focused and concise
 - Write tests for new features

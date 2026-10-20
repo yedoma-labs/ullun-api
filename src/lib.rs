@@ -21,6 +21,18 @@
 //! }
 //! ```
 
+//! ## Optional features
+//!
+//! | Feature | Adds |
+//! |---------|------|
+//! | `jwt` | `ullun::jwt` - HS256 tokens and bearer-auth middleware |
+//! | `compression` | `ullun::compression` - gzip middleware |
+//! | `websocket` | `App::ws` and `ullun::websocket` |
+//! | `full` | all of the above |
+//!
+//! Always available: [`rate_limit`], [`openapi`], [`template`], form parsing
+//! (`Request::form`) and group-level middleware.
+
 pub mod app;
 #[cfg(feature = "compression")]
 pub mod compression;
