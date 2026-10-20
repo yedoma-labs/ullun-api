@@ -405,30 +405,28 @@ async fn handle_request(
 
     let mut request = Request::new(parts.method, parts.uri, parts.headers, body_bytes);
 
-    // Match route
-    let result = match router.match_route(&method, &path) {
+    // Match route. A miss still runs the middleware chain (CORS preflight,
+    // request ids, logging, security headers) and ends in a 404.
+    let handler: Option<DynHandler> = match router.match_route(&method, &path) {
         Ok((handler, params)) => {
             request.params = params;
-
-            // Run middlewares + handler
-            if middlewares.is_empty() {
-                handler.call(request).await
-            } else {
-                // Create middleware chain
-                let mut chain = middlewares.to_vec();
-
-                // Add final handler as last middleware
-                let final_handler = Arc::new(move |req: Request, _next: Next| {
-                    let h = handler.clone();
-                    async move { h.call(req).await }
-                });
-                chain.push(final_handler as Arc<dyn Middleware>);
-
-                let next = Next::new(Arc::new(chain));
-                next.run(request).await
-            }
+            Some(handler)
         }
-        Err(e) => Err(e),
+        Err(_) => None,
+    };
+
+    let result = if middlewares.is_empty() {
+        dispatch(handler, request).await
+    } else {
+        // Route handler (or the 404) runs as the last link of the chain
+        let mut chain = middlewares.to_vec();
+        let final_handler = Arc::new(move |req: Request, _next: Next| {
+            let handler = handler.clone();
+            async move { dispatch(handler, req).await }
+        });
+        chain.push(final_handler as Arc<dyn Middleware>);
+
+        Next::new(Arc::new(chain)).run(request).await
     };
 
     // Convert Result to Response
@@ -438,4 +436,11 @@ async fn handle_request(
     };
 
     response.into_hyper()
+}
+
+async fn dispatch(handler: Option<DynHandler>, req: Request) -> Result<Response> {
+    match handler {
+        Some(handler) => handler.call(req).await,
+        None => Err(Error::not_found("Route not found")),
+    }
 }
