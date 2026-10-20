@@ -25,6 +25,8 @@ pub mod app;
 pub mod cookies;
 pub mod error;
 pub mod handler;
+#[cfg(feature = "jwt")]
+pub mod jwt;
 pub mod middleware;
 pub mod rate_limit;
 pub mod request;
