@@ -49,7 +49,7 @@
 
 **File uploads** - Never build a path from the client's file name: `multipart::sanitize_filename` is for display and download names, store under a generated id. Serve user content as `Content-Disposition: attachment` with `X-Content-Type-Options: nosniff` and a sandboxing CSP unless the type is known to be inert (images, PDF, media). Cap sizes per file and per user (`App::body_limit`, quotas), and write atomically. `examples/drive` shows all of this. `serve_static` never serves dotfiles and rejects encoded traversal.
 
-**Server-side requests (SSRF)** - If your service fetches URLs that users or admins provide, resolve the host yourself, reject loopback/private/link-local/CGNAT addresses (including IPv4-mapped IPv6) and connect to the vetted address only, as `examples/statuspage` does.
+**Server-side requests (SSRF)** - If your service fetches URLs that users or admins provide, use `ullun::security::resolve_public`: it requires every DNS answer to be a public address (loopback, private, link-local, CGNAT, multicast, documentation and IPv6 forms that embed IPv4 are refused) and returns the address to connect to, so check and use cannot diverge. `examples/statuspage` and `examples/webhooks` do this on every request.
 
 **Rate Limiting** - `RateLimiter` middleware (per instance, in memory)
 - Keyed by peer IP by default; `trust_forwarded_for()` only behind your own reverse proxy
