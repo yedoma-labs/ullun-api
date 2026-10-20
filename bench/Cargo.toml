@@ -1,0 +1,28 @@
+[package]
+name = "ullun-bench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Reproducible HTTP benchmarks: ullun-api next to axum and actix-web, driven by a built-in load generator"
+
+# not part of the ullun-api package or workspace: it pulls in competitors
+[workspace]
+
+[dependencies]
+ullun-api = { path = ".." }
+axum = "0.8"
+actix-web = "4"
+tokio = { version = "1", features = ["full"] }
+hyper = { version = "1", features = ["full"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+bytes = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hdrhistogram = "7"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"

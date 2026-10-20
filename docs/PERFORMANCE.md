@@ -1,6 +1,40 @@
 # Performance Guide
 
-## Benchmarks
+## Framework comparison (ullun-api vs axum vs actix-web)
+
+`bench/` is a standalone crate (own workspace, not published) that runs the same five
+scenarios (`hello`, `json`, `param`, `post`, `middleware`) against ullun-api, axum and
+actix-web with an identical closed-loop HTTP/1.1 keep-alive load generator, and prints a
+Markdown table. It needs only a Rust toolchain, so it runs on any machine:
+
+```bash
+scripts/bench.sh                 # full run (~8 min): 8 s x 3 rounds per framework and scenario
+scripts/bench.sh --quick         # smoke test
+scripts/bench.sh --duration 10 --rounds 5 --connections 128 --frameworks ullun,axum --scenarios hello,json
+scripts/bench.sh --micro         # additionally run the criterion suites
+```
+
+Results (JSON + Markdown, with CPU, OS, core count, compiler and library versions) are
+written to `bench/results/`; send the `.md` file to compare machines. Reference run,
+ullun-api 0.4.2, axum 0.8.9, actix-web 4.17.0, rustc 1.99.0, Intel i7-8750H (12 logical
+cores) macOS, 64 connections, 5 s x 3 rounds (median), 6 server + 6 load threads:
+
+| scenario | ullun-api | axum | actix-web |
+|---|---:|---:|---:|
+| hello | 85.6k req/s | 79.6k | 74.0k |
+| json | 79.6k | 78.1k | 76.8k |
+| param | 77.1k | 76.7k | 77.2k |
+| post | 75.8k | 75.9k | 77.8k |
+| middleware (3 layers) | 77.3k | 78.7k | 79.7k |
+
+Read this honestly: all three land within a few percent of each other, and the load
+generator shares the CPU with the server, so on this machine the measurement is mostly
+bounded by loopback and the client, not by the frameworks. Differences below ~5 % are
+noise. The table says "no framework is a bottleneck here", not "ullun-api is faster".
+For sharper results use a separate load machine, or raise `--load-threads` and
+`--server-threads` on a many-core host.
+
+## Criterion micro-benchmarks
 
 Two [criterion](https://github.com/bheisler/criterion.rs) suites, both in `benches/`:
 

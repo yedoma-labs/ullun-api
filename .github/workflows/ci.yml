@@ -113,6 +113,17 @@ jobs:
       - run: cargo build --release --examples --all-features --verbose
       - run: cargo bench --no-run --all-features
 
+  bench-tooling:
+    name: Benchmark tooling
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: bench
+      - run: scripts/bench.sh --quick --frameworks ullun,axum --scenarios hello,json
+
   coverage:
     name: Code Coverage
     runs-on: ubuntu-24.04
