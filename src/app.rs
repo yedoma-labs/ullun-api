@@ -207,6 +207,21 @@ impl App {
         }
     }
 
+    /// Serve on an already bound listener until the future is dropped.
+    ///
+    /// Useful for tests, benchmarks and embedding: bind to port `0`, read the
+    /// assigned port from `listener.local_addr()`, then call `serve`.
+    /// Unlike [`App::run`], this does not install a CTRL+C handler.
+    pub async fn serve(self, listener: TcpListener) -> Result<()> {
+        Self::serve_loop(
+            listener,
+            Arc::new(self.router),
+            Arc::new(self.middlewares),
+            self.max_body_size,
+        )
+        .await
+    }
+
     async fn serve_loop(
         listener: TcpListener,
         router: Arc<Router>,
