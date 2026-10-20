@@ -232,3 +232,68 @@ async fn rate_limiter_key_by_header_and_exemption() {
         assert_eq!(send(addr, "GET", "/").await.0, 200);
     }
 }
+
+#[cfg(feature = "jwt")]
+mod jwt_middleware {
+    use super::*;
+    use ullun::jwt::{self, Claims, JwtAuth};
+
+    const SECRET: &str = "0123456789abcdef0123456789abcdef";
+
+    #[tokio::test]
+    async fn bearer_auth_guards_a_group_and_exposes_claims() {
+        let addr = spawn(
+            App::new()
+                .get("/open", |_req: Request| async {
+                    Ok(Response::text("open"))
+                })
+                .group("/api", |g| {
+                    g.middleware(JwtAuth::new(SECRET))
+                        .get("/me", |req: Request| async move {
+                            let claims = req.extensions.get::<Claims>().expect("claims");
+                            Ok(Response::json(&claims.0))
+                        })
+                }),
+        )
+        .await;
+
+        let good = jwt::encode(
+            &serde_json::json!({ "sub": "ann", "exp": jwt::expires_in(60) }),
+            SECRET.as_bytes(),
+        )
+        .unwrap();
+        let expired = jwt::encode(
+            &serde_json::json!({ "exp": jwt::now() - 5 }),
+            SECRET.as_bytes(),
+        )
+        .unwrap();
+        let forged = jwt::encode(
+            &serde_json::json!({ "sub": "root" }),
+            b"ffffffffffffffffffffffffffffffff",
+        )
+        .unwrap();
+
+        assert_eq!(send(addr, "GET", "/open").await.0, 200);
+        assert_eq!(send(addr, "GET", "/api/me").await.0, 401);
+
+        let auth = |t: &str| format!("Bearer {t}");
+        let (status, _, body) =
+            send_with(addr, "GET", "/api/me", &[("authorization", &auth(&good))]).await;
+        assert_eq!(status, 200);
+        assert!(body.contains(r#""sub":"ann""#));
+
+        for token in [&expired, &forged] {
+            let (status, _, _) =
+                send_with(addr, "GET", "/api/me", &[("authorization", &auth(token))]).await;
+            assert_eq!(status, 401);
+        }
+        // wrong scheme
+        let basic = format!("Basic {good}");
+        assert_eq!(
+            send_with(addr, "GET", "/api/me", &[("authorization", &basic)])
+                .await
+                .0,
+            401
+        );
+    }
+}
