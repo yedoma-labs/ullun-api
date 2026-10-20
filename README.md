@@ -287,6 +287,21 @@ let short_code = random_alphanumeric(7)?;          // uniform [A-Za-z0-9]
 let ok = constant_time_eq(given.as_bytes(), expected.as_bytes());   // for API keys, delete tokens, ...
 ```
 
+### Rooms (publish/subscribe)
+
+```rust
+let hub: Hub<ChatEvent> = Hub::new(64);              // 64 buffered messages per room
+let mut sub = hub.subscribe("general");              // leaves the room when dropped
+hub.publish("general", event);                       // fan-out to every member
+match sub.recv().await {
+    Some(Delivery::Message(e)) => { /* forward to this client */ }
+    Some(Delivery::Missed(n))  => { /* this client was too slow and lost n messages */ }
+    None => {}
+}
+```
+
+Slow members never hold the others back, and a room disappears with its last member. Combined with `App::ws` this is a chat server in a few dozen lines (see `examples/chat`). WebSockets ping idle peers every 30 s and drop silent ones after 90 s (`WsOptions::ping_interval` / `idle_timeout`); `RouteGroup::ws_with` lets group middleware, such as a ticket check, run before the upgrade.
+
 ### Observability
 
 ```rust
@@ -620,6 +635,7 @@ Complete services that run as they are and are covered by integration tests (`te
 | [`shortener`](examples/shortener) | `cargo run --example shortener` | URL shortener: API-key management API, public redirects, click counting, expiry, per-key rate limit, JSON file persistence, OpenAPI |
 | [`taskboard`](examples/taskboard) (`jwt`) | `DEV=1 cargo run --example taskboard --features jwt` | REST API: registration/login (argon2 + JWT), per-user projects and tasks, 422 field errors, filter/sort/pagination, ETag + If-Match, login throttling, OpenAPI + Swagger UI |
 | [`statuspage`](examples/statuspage) | `DEV=1 cargo run --example statuspage` | Uptime monitor: background scheduler, HTTP/TCP checks with SSRF protection, public status page with live Server-Sent Events, admin API, graceful SIGTERM shutdown |
+| [`chat`](examples/chat) (`websocket`, `jwt`) | `DEV=1 cargo run --example chat --features websocket,jwt` | Chat rooms over WebSockets: one-time tickets instead of tokens in URLs, history, presence, rate limits, connection limits, graceful close |
 | [`gateway`](examples/gateway) | `DEV=1 cargo run --example gateway` | Reverse proxy: prefix routing, round-robin, failover for idempotent requests, passive health checks, 502/504, streaming relay, forwarded headers, traversal-proof paths, access log + metrics |
 | [`blog`](examples/blog) | `DEV=1 cargo run --example blog` | Blog/CMS: Markdown posts (escaped HTML, safe links), admin login with argon2, sessions renewed on login, CSRF on every form, throttled login, strict CSP, RSS and sitemap, drafts, ETags |
 | [`drive`](examples/drive) | `DEV=1 cargo run --example drive` | File drive: multipart uploads, per-user quotas, resumable downloads (Range), expiring share links with download limits, sandboxed risky types, per-route body limits |

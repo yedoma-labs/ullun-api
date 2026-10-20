@@ -53,6 +53,7 @@ tests/
 ├── example_shortener.rs  # Real-world example apps, run over real HTTP
 ├── example_pastebin.rs   #   (the app modules are included with #[path])
 ├── example_taskboard.rs  #   (feature jwt)
+├── example_chat.rs       #   (real WebSocket clients, features websocket + jwt)
 ├── example_gateway.rs    #   (real upstream servers, failover, streaming relay)
 ├── observability_test.rs # Request ids, access log, metrics
 ├── example_blog.rs       #   (browser-like: cookie jar, CSRF tokens scraped from HTML)
