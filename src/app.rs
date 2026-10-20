@@ -1,12 +1,13 @@
 //! Main application orchestrator
 
 use crate::error::{Error, Result};
-use crate::handler::{DynHandler, Handler, HandlerWithParams};
+use crate::handler::{BoxFuture, DynHandler, Handler, HandlerWithParams};
 use crate::middleware::{Layered, Middleware, Next};
 use crate::openapi::{self, OpenApiInfo, Operation, RouteKind};
 use crate::request::{Params, Request, StateMap};
 use crate::response::Response;
 use crate::router::Router;
+use crate::shutdown::{Context, Shutdown};
 use http_body_util::BodyExt;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
@@ -15,6 +16,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::net::TcpListener;
 
 /// Main application struct
@@ -25,7 +27,11 @@ pub struct App {
     docs: HashMap<(String, String), Operation>,
     openapi: Option<OpenApiInfo>,
     state: StateMap,
+    background: Vec<BackgroundTask>,
+    shutdown_grace: Duration,
 }
+
+type BackgroundTask = Box<dyn FnOnce(Context) -> BoxFuture<'static, ()> + Send>;
 
 /// Everything a running server shares between connections
 struct Shared {
@@ -33,6 +39,7 @@ struct Shared {
     middlewares: Vec<Arc<dyn Middleware>>,
     max_body_size: Option<usize>,
     state: Arc<StateMap>,
+    shutdown: Shutdown,
 }
 
 /// Route group builder
@@ -52,6 +59,8 @@ impl App {
             docs: HashMap::new(),
             openapi: None,
             state: StateMap::default(),
+            background: Vec::new(),
+            shutdown_grace: Duration::from_secs(10),
         }
     }
 
@@ -84,6 +93,43 @@ impl App {
     /// ```
     pub fn state<T: Send + Sync + 'static>(mut self, value: T) -> Self {
         self.state.insert(value);
+        self
+    }
+
+    /// Run `task` alongside the server, started when it starts serving
+    ///
+    /// The task gets a [`Context`] with the shared state and the shutdown
+    /// signal; it should return when `ctx.sleep(..)` reports `false` or
+    /// `ctx.shutdown().wait()` completes. Finished tasks are awaited during
+    /// shutdown, for at most [`App::shutdown_grace`].
+    ///
+    /// ```
+    /// use std::time::Duration;
+    /// use ullun::prelude::*;
+    ///
+    /// struct Jobs;
+    ///
+    /// let app = App::new().state(Jobs).background(|ctx: Context| async move {
+    ///     while ctx.sleep(Duration::from_secs(60)).await {
+    ///         let _jobs = ctx.state::<Jobs>().unwrap();
+    ///         // purge expired sessions, refresh caches, ...
+    ///     }
+    /// });
+    /// ```
+    pub fn background<F, Fut>(mut self, task: F) -> Self
+    where
+        F: FnOnce(Context) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
+        self.background
+            .push(Box::new(move |ctx| Box::pin(task(ctx))));
+        self
+    }
+
+    /// How long shutdown waits for in-flight requests and background tasks
+    /// (default 10 seconds)
+    pub fn shutdown_grace(mut self, grace: Duration) -> Self {
+        self.shutdown_grace = grace;
         self
     }
 
@@ -292,9 +338,11 @@ impl App {
         self
     }
 
-    /// Run the server with graceful shutdown on CTRL+C
+    /// Run the server until CTRL+C or SIGTERM, then shut down gracefully
+    ///
+    /// Stops accepting connections, lets in-flight requests finish and waits
+    /// for background tasks, each for at most [`App::shutdown_grace`].
     pub async fn run(self, addr: &str) -> Result<()> {
-        let this = self.finalize();
         let addr: SocketAddr = addr
             .parse()
             .map_err(|e| Error::internal(format!("Invalid address: {}", e)))?;
@@ -305,41 +353,103 @@ impl App {
 
         println!("🚀 ullun-api listening on http://{}", addr);
 
-        let shared = Arc::new(this.into_shared());
-
-        // Graceful shutdown signal
-        let shutdown = async {
-            tokio::signal::ctrl_c()
-                .await
-                .expect("Failed to install CTRL+C handler");
-            println!("\n🛑 Shutting down gracefully...");
-        };
-
-        tokio::select! {
-            _ = shutdown => {
-                println!("✅ Server stopped");
-                Ok(())
-            }
-            result = Self::serve_loop(listener, shared) => result
-        }
+        let result = self
+            .serve_with_shutdown(listener, async {
+                termination_signal().await;
+                println!("\n🛑 Shutting down gracefully...");
+            })
+            .await;
+        println!("✅ Server stopped");
+        result
     }
 
     /// Serve on an already bound listener until the future is dropped.
     ///
     /// Useful for tests, benchmarks and embedding: bind to port `0`, read the
     /// assigned port from `listener.local_addr()`, then call `serve`.
-    /// Unlike [`App::run`], this does not install a CTRL+C handler.
+    /// Unlike [`App::run`], this does not install signal handlers; use
+    /// [`App::serve_with_shutdown`] for a graceful stop.
     pub async fn serve(self, listener: TcpListener) -> Result<()> {
-        let this = self.finalize();
-        Self::serve_loop(listener, Arc::new(this.into_shared())).await
+        self.serve_with_shutdown(listener, std::future::pending())
+            .await
     }
 
-    fn into_shared(self) -> Shared {
+    /// Serve until `signal` completes, then shut down gracefully
+    ///
+    /// New connections are refused, idle keep-alive connections are closed,
+    /// running requests finish, the shutdown signal reaches
+    /// [`Request::shutdown_signal`] and background tasks, and the call returns
+    /// once everything has stopped or [`App::shutdown_grace`] has passed.
+    pub async fn serve_with_shutdown(
+        mut self,
+        listener: TcpListener,
+        signal: impl std::future::Future<Output = ()>,
+    ) -> Result<()> {
+        self = self.finalize();
+        let grace = self.shutdown_grace;
+        let background = std::mem::take(&mut self.background);
+        let (trigger, rx) = tokio::sync::watch::channel(false);
+        let shutdown = Shutdown::new(rx);
+        let shared = Arc::new(self.into_shared(shutdown.clone()));
+
+        let tasks: Vec<_> = background
+            .into_iter()
+            .map(|task| {
+                let ctx = Context::new(shared.state.clone(), shutdown.clone());
+                tokio::spawn(task(ctx))
+            })
+            .collect();
+
+        // every connection holds a clone; the channel closes when all are done
+        let (done_tx, mut done_rx) = tokio::sync::mpsc::channel::<()>(1);
+        tokio::pin!(signal);
+        loop {
+            tokio::select! {
+                _ = &mut signal => break,
+                accepted = listener.accept() => match accepted {
+                    Ok((stream, peer)) => {
+                        tokio::spawn(serve_connection(
+                            stream,
+                            peer,
+                            shared.clone(),
+                            shutdown.clone(),
+                            done_tx.clone(),
+                        ));
+                    }
+                    Err(e) => {
+                        // typically out of file descriptors: back off instead of dying
+                        eprintln!("Failed to accept connection: {}", e);
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                },
+            }
+        }
+
+        let _ = trigger.send(true);
+        drop(done_tx);
+        drop(listener);
+        let drain = async {
+            let _ = done_rx.recv().await;
+            for task in tasks {
+                let _ = task.await;
+            }
+        };
+        if tokio::time::timeout(grace, drain).await.is_err() {
+            eprintln!(
+                "Shutdown grace period of {:?} elapsed, stopping anyway",
+                grace
+            );
+        }
+        Ok(())
+    }
+
+    fn into_shared(self, shutdown: Shutdown) -> Shared {
         Shared {
             router: self.router,
             middlewares: self.middlewares,
             max_body_size: self.max_body_size,
             state: Arc::new(self.state),
+            shutdown,
         }
     }
 
@@ -384,37 +494,61 @@ impl App {
             panic!("Failed to register {} route {}: {}", method, path, e);
         }
     }
+}
 
-    async fn serve_loop(listener: TcpListener, shared: Arc<Shared>) -> Result<()> {
-        loop {
-            let (stream, peer) = listener
-                .accept()
-                .await
-                .map_err(|e| Error::internal(format!("Failed to accept: {}", e)))?;
+/// One connection, until it closes or shutdown drains it
+async fn serve_connection(
+    stream: tokio::net::TcpStream,
+    peer: SocketAddr,
+    shared: Arc<Shared>,
+    shutdown: Shutdown,
+    _done: tokio::sync::mpsc::Sender<()>,
+) {
+    let io = TokioIo::new(stream);
+    let service = service_fn(|req| {
+        let shared = shared.clone();
+        async move { Ok::<_, Infallible>(handle_request(req, peer, shared).await) }
+    });
+    let conn = http1::Builder::new()
+        .serve_connection(io, service)
+        .with_upgrades();
+    tokio::pin!(conn);
 
-            let io = TokioIo::new(stream);
-            let shared = shared.clone();
-
-            tokio::task::spawn(async move {
-                if let Err(err) =
-                    http1::Builder::new()
-                        .serve_connection(
-                            io,
-                            service_fn(|req| {
-                                let shared = shared.clone();
-                                async move {
-                                    Ok::<_, Infallible>(handle_request(req, peer, shared).await)
-                                }
-                            }),
-                        )
-                        .with_upgrades()
-                        .await
-                {
+    let mut draining = false;
+    loop {
+        tokio::select! {
+            result = conn.as_mut() => {
+                if let Err(err) = result {
                     eprintln!("Error serving connection: {:?}", err);
                 }
-            });
+                return;
+            }
+            _ = shutdown.wait(), if !draining => {
+                // idle connections close now, busy ones after their response
+                conn.as_mut().graceful_shutdown();
+                draining = true;
+            }
         }
     }
+}
+
+/// CTRL+C everywhere, plus SIGTERM on Unix (what container runtimes send)
+async fn termination_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        match signal(SignalKind::terminate()) {
+            Ok(mut term) => {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {}
+                    _ = term.recv() => {}
+                }
+                return;
+            }
+            Err(e) => eprintln!("Cannot listen for SIGTERM: {}", e),
+        }
+    }
+    let _ = tokio::signal::ctrl_c().await;
 }
 
 impl Default for App {
@@ -525,6 +659,7 @@ async fn handle_request(
         middlewares,
         max_body_size,
         state,
+        shutdown,
     } = &*shared;
     let max_body_size = *max_body_size;
     let method = req.method().to_string();
@@ -574,6 +709,7 @@ async fn handle_request(
     request.extensions = parts.extensions;
     request.remote_addr = Some(peer);
     request.state = Some(state.clone());
+    request.shutdown = Some(shutdown.clone());
 
     // Match route. A miss still runs the middleware chain (CORS preflight,
     // request ids, logging, security headers) and ends in a 404.

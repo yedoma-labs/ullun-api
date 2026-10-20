@@ -145,6 +145,7 @@ pub struct Request {
     /// Address of the connected peer (the proxy when behind one)
     pub remote_addr: Option<std::net::SocketAddr>,
     pub(crate) state: Option<std::sync::Arc<StateMap>>,
+    pub(crate) shutdown: Option<crate::shutdown::Shutdown>,
     cookies: OnceCell<Cookies>,
 }
 
@@ -170,6 +171,7 @@ impl Request {
             extensions: http::Extensions::new(),
             remote_addr: None,
             state: None,
+            shutdown: None,
             cookies: OnceCell::new(),
         }
     }
@@ -185,6 +187,16 @@ impl Request {
                 std::any::type_name::<T>()
             ))
         })
+    }
+
+    /// Signal that fires when the server begins shutting down
+    ///
+    /// Long-lived handlers (SSE streams, polling loops) select on it to end
+    /// promptly: `tokio::select! { _ = req.shutdown_signal().wait() => break, ... }`.
+    pub fn shutdown_signal(&self) -> crate::shutdown::Shutdown {
+        self.shutdown
+            .clone()
+            .unwrap_or_else(crate::shutdown::Shutdown::never)
     }
 
     /// Like [`Request::state`], `None` when the type is not registered
