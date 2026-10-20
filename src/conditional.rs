@@ -103,7 +103,7 @@ impl Middleware for ETags {
             Ok(res) => res,
             Err(err) => Response::from_error(err),
         };
-        if !is_get || res.status != http::StatusCode::OK {
+        if !is_get || res.status != http::StatusCode::OK || res.is_streaming() {
             return Ok(res);
         }
 
