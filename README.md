@@ -13,13 +13,11 @@
 [![Downloads](https://img.shields.io/crates/d/ullun-api.svg)](https://crates.io/crates/ullun-api)
 [![Documentation](https://docs.rs/ullun-api/badge.svg)](https://docs.rs/ullun-api)
 [![License](https://img.shields.io/crates/l/ullun-api.svg)](LICENSE)
-[![Rust Version](https://img.shields.io/badge/rust-1.96%2B-blue.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-stable-blue.svg)](https://www.rust-lang.org)
 
 [![codecov](https://codecov.io/gh/yedoma-labs/ullun-api/branch/main/graph/badge.svg)](https://codecov.io/gh/yedoma-labs/ullun-api)
-[![Lines of Code](https://img.shields.io/badge/lines-~2.8k-blue)](src/)
 [![No Unsafe](https://img.shields.io/badge/unsafe-0%25-success)](#security)
-[![Performance](https://img.shields.io/badge/throughput-50k%2B%20req%2Fs-green)](docs/PERFORMANCE.md)
-[![Binary Size](https://img.shields.io/badge/binary-~1.5MB-lightgrey)](#features)
+[![Benchmarks](https://img.shields.io/badge/benchmarks-measured-green)](docs/PERFORMANCE.md)
 
 [![GitHub stars](https://img.shields.io/github/stars/yedoma-labs/ullun-api?style=social)](https://github.com/yedoma-labs/ullun-api)
 [![GitHub forks](https://img.shields.io/github/forks/yedoma-labs/ullun-api?style=social)](https://github.com/yedoma-labs/ullun-api/fork)
@@ -56,7 +54,7 @@ async fn main() {
 
 ## Features
 
-- **🚀 Fast:** Built on hyper + tokio, ~150KB compiled binary
+- **🚀 Fast:** Built on hyper + tokio, measured numbers in [PERFORMANCE.md](docs/PERFORMANCE.md)
 - **🎯 Simple:** Express.js-style routing, zero boilerplate
 - **🔒 Type-safe:** Path parameters validated at compile-time
 - **🔗 Middleware:** Chain middleware like Express.js
@@ -259,8 +257,18 @@ let app = App::new()
     .delete(path, handler)        // DELETE route
     .get_with_params(path, handler) // GET with path params extractor
     .middleware(middleware)       // Add middleware
-    .run(addr);                   // Start server
+    .run(addr);                   // Start server (graceful shutdown on CTRL+C)
 ```
+
+Need the bound port, or no signal handler (tests, benchmarks, embedding)? Bind yourself and use `serve`:
+
+```rust
+let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+println!("port {}", listener.local_addr()?.port());
+app.serve(listener).await?;
+```
+
+Middleware runs for every request, including unmatched routes (404) and CORS preflight (`OPTIONS`).
 
 ### Handlers
 
@@ -319,18 +327,30 @@ App::new()
 
 ## Examples
 
-See the [`examples/`](examples/) directory:
+See the [`examples/`](examples/) directory. Basics:
 
 - [`hello_world.rs`](examples/hello_world.rs) - Minimal example
-- [`full_api.rs`](examples/full_api.rs) - Full CRUD API with middleware
-- [`todo_api.rs`](examples/todo_api.rs) - Complete TODO API with authentication
+- [`full_api.rs`](examples/full_api.rs) - CRUD API with middleware
+- [`todo_api.rs`](examples/todo_api.rs) - TODO API with token authentication
+- [`complete_api.rs`](examples/complete_api.rs) - In-memory store, sessions, groups
+- [`features_0_2_0.rs`](examples/features_0_2_0.rs) - Route groups, cookies, static files
+
+Scenarios (each is a self-contained deployment shape):
+
+| Scenario | Example | Shows |
+|----------|---------|-------|
+| Containerised microservice | [`microservice.rs`](examples/microservice.rs) | `/healthz` + `/readyz` probes, request ids, Prometheus metrics, `PORT` config, graceful shutdown |
+| Public API for third parties | [`public_api.rs`](examples/public_api.rs) | API keys, per-key rate limiting with `retry-after`, CORS preflight, versioned group, pagination |
+| SPA + backend in one binary | [`spa_backend.rs`](examples/spa_backend.rs) | Static frontend at `/`, JSON API under `/api`, security headers |
+| Webhook receiver | [`webhook_receiver.rs`](examples/webhook_receiver.rs) | Constant-time token check, body limit, idempotency, `202` + background worker |
+| Server-rendered HTML | [`html_forms.rs`](examples/html_forms.rs) | Form posts, cookie sessions, flash messages, Post/Redirect/Get, HTML escaping |
 
 Run examples:
 
 ```bash
 cargo run --example hello_world
-cargo run --example full_api
-cargo run --example todo_api
+cargo run --example microservice
+PORT=8080 cargo run --example public_api   # scenario examples read PORT (default 3000)
 ```
 
 Test the API:
@@ -350,12 +370,14 @@ curl -X POST http://localhost:3000/users \
 
 ## Comparison
 
-| Framework | Bundle Size | Learning Curve | Middleware | Type Safety |
-|-----------|-------------|----------------|------------|-------------|
-| Actix-web | 500KB | High | Complex | ★★★★☆ |
-| Rocket | 600KB | Medium | Good | ★★★★★ |
-| Axum | 300KB | Medium | Tokio-coupled | ★★★★☆ |
-| **ullun-api** | ~150KB | **Low** | **Express-style** | ★★★★★ |
+| Framework | Learning Curve | Middleware | Style |
+|-----------|----------------|------------|-------|
+| Actix-web | High | Complex | Actor/extractor based |
+| Rocket | Medium | Fairings | Macro/attribute based |
+| Axum | Medium | Tower layers | Extractor based |
+| **ullun-api** | **Low** | **Express-style** `(req, next)` | Closures and `async fn(Request)` |
+
+This table is qualitative. We do not publish cross-framework speed claims; see [PERFORMANCE.md](docs/PERFORMANCE.md) for what is measured.
 
 ## Testing & Benchmarks
 
@@ -363,7 +385,7 @@ curl -X POST http://localhost:3000/users \
 # Run tests
 cargo test
 
-# Run benchmarks
+# Run benchmarks (micro + end-to-end HTTP)
 cargo bench
 
 # Check coverage
@@ -391,36 +413,32 @@ See [SECURITY.md](SECURITY.md) for comprehensive guidelines and best practices.
 
 ## Roadmap
 
-### v0.2
+### Done
+- [x] Route groups, cookies, static file serving, body size limits (0.2)
+- [x] Scenario examples, end-to-end HTTP benchmarks
+
+### Next
+- [ ] Group-level middleware (`RouteGroup::middleware` is accepted but ignored today)
 - [ ] OpenAPI/Swagger generation
 - [ ] WebSocket support
-- [ ] Static file serving
-- [ ] Form data parsing
-- [ ] Cookie handling
-
-### v0.3+
+- [ ] Form data parsing helpers
+- [ ] Rate limiting, compression and JWT helpers (patterns in `examples/public_api.rs`)
 - [ ] Template engine integration
-- [ ] Database connection pooling helpers
-- [ ] Rate limiting middleware
-- [ ] JWT authentication helpers
-- [ ] Compression middleware
 
 ## CI/CD
 
-GitHub Actions workflows:
-- ✅ **CI:** Test on Linux/macOS/Windows + Rust stable/beta
-- ✅ **Security:** cargo-audit checks
-- ✅ **Format:** rustfmt checks
-- ✅ **Lint:** clippy checks
-- ✅ **Coverage:** Code coverage reports
-- ✅ **Benchmarks:** Performance tracking
-- ✅ **Release:** Automated builds & publishing
+GitHub Actions (`.github/workflows/ci.yml`):
+- ✅ **Lint:** `rustfmt`, `clippy -D warnings`, rustdoc, `cargo audit` on every PR and on `main`
+- ✅ **Test:** Linux, macOS, Windows
+- ✅ **Build:** release build of all examples, benchmarks compile
+- ✅ **Commits:** PR title and commits must be [Conventional Commits](https://www.conventionalcommits.org/)
+- ✅ **Release:** on `main`, *only after lint, tests and build passed*, [release-plz](https://release-plz.dev) derives the next version from the commits, maintains a release PR with the changelog, and on merge tags, creates the GitHub release and publishes to crates.io
 
-See [`.github/workflows/`](.github/workflows/) for details.
+See [CONTRIBUTING.md](CONTRIBUTING.md#releases) for the details and required secrets.
 
 ## Contributing
 
-Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Contributions welcome! Commits follow [Conventional Commits](https://www.conventionalcommits.org/); see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 

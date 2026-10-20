@@ -48,7 +48,7 @@ impl App {
     pub fn group(mut self, prefix: &str, configure: impl FnOnce(RouteGroup) -> RouteGroup) -> Self {
         let group = RouteGroup::new(prefix);
         let group = configure(group);
-        
+
         // Register all routes with prefix
         for (method, path, handler) in group.routes {
             let full_path = format!("{}{}", group.prefix, path);
@@ -56,13 +56,13 @@ impl App {
                 panic!("Failed to register {} route {}: {}", method, full_path, e);
             }
         }
-        
+
         // Note: Group-level middlewares not yet supported - would apply globally
         // Use route-specific middleware wrapping instead for now
         if !group.middlewares.is_empty() {
             eprintln!("Warning: RouteGroup.middleware() is not yet implemented. Middlewares will be ignored.");
         }
-        
+
         self
     }
 
@@ -165,11 +165,19 @@ impl App {
     pub fn serve_static(mut self, route_prefix: &str, dir_path: &str) -> Self {
         use crate::static_files::StaticFileHandler;
         let handler = StaticFileHandler::new(dir_path);
-        // Use catch-all parameter syntax: {*param} matches rest of path
+        // matchit 0.9 catch-all syntax: {*param} matches the rest of the path
         let prefix = route_prefix.trim_end_matches('/');
-        let route = format!("{}/*filepath", prefix);
-        if let Err(e) = self.router.insert("GET", &route, Arc::new(handler) as DynHandler) {
+        let handler: DynHandler = Arc::new(handler);
+        let route = format!("{}/{{*filepath}}", prefix);
+        if let Err(e) = self.router.insert("GET", &route, handler.clone()) {
             panic!("Failed to register static file route {}: {}", route, e);
+        }
+        // The catch-all needs at least one segment, so also serve the prefix
+        // root (-> index.html). Skipped when the user already owns that route.
+        let root = if prefix.is_empty() { "/" } else { prefix };
+        let _ = self.router.insert("GET", root, handler.clone());
+        if !prefix.is_empty() {
+            let _ = self.router.insert("GET", &format!("{}/", prefix), handler);
         }
         self
     }
@@ -205,6 +213,21 @@ impl App {
             }
             result = Self::serve_loop(listener, router, middlewares, max_body_size) => result
         }
+    }
+
+    /// Serve on an already bound listener until the future is dropped.
+    ///
+    /// Useful for tests, benchmarks and embedding: bind to port `0`, read the
+    /// assigned port from `listener.local_addr()`, then call `serve`.
+    /// Unlike [`App::run`], this does not install a CTRL+C handler.
+    pub async fn serve(self, listener: TcpListener) -> Result<()> {
+        Self::serve_loop(
+            listener,
+            Arc::new(self.router),
+            Arc::new(self.middlewares),
+            self.max_body_size,
+        )
+        .await
     }
 
     async fn serve_loop(
@@ -266,7 +289,11 @@ impl RouteGroup {
     where
         H: Handler,
     {
-        self.routes.push(("GET".to_string(), path.to_string(), Arc::new(handler) as DynHandler));
+        self.routes.push((
+            "GET".to_string(),
+            path.to_string(),
+            Arc::new(handler) as DynHandler,
+        ));
         self
     }
 
@@ -274,7 +301,11 @@ impl RouteGroup {
     where
         H: Handler,
     {
-        self.routes.push(("POST".to_string(), path.to_string(), Arc::new(handler) as DynHandler));
+        self.routes.push((
+            "POST".to_string(),
+            path.to_string(),
+            Arc::new(handler) as DynHandler,
+        ));
         self
     }
 
@@ -282,7 +313,11 @@ impl RouteGroup {
     where
         H: Handler,
     {
-        self.routes.push(("PUT".to_string(), path.to_string(), Arc::new(handler) as DynHandler));
+        self.routes.push((
+            "PUT".to_string(),
+            path.to_string(),
+            Arc::new(handler) as DynHandler,
+        ));
         self
     }
 
@@ -290,7 +325,11 @@ impl RouteGroup {
     where
         H: Handler,
     {
-        self.routes.push(("DELETE".to_string(), path.to_string(), Arc::new(handler) as DynHandler));
+        self.routes.push((
+            "DELETE".to_string(),
+            path.to_string(),
+            Arc::new(handler) as DynHandler,
+        ));
         self
     }
 
@@ -298,7 +337,11 @@ impl RouteGroup {
     where
         H: Handler,
     {
-        self.routes.push(("PATCH".to_string(), path.to_string(), Arc::new(handler) as DynHandler));
+        self.routes.push((
+            "PATCH".to_string(),
+            path.to_string(),
+            Arc::new(handler) as DynHandler,
+        ));
         self
     }
 
@@ -339,7 +382,7 @@ async fn handle_request(
                 }
             }
         }
-        
+
         // Limit actual stream reading (prevents bypass via chunked encoding)
         let limited = http_body_util::Limited::new(body, max_size);
         match limited.collect().await {
@@ -362,30 +405,28 @@ async fn handle_request(
 
     let mut request = Request::new(parts.method, parts.uri, parts.headers, body_bytes);
 
-    // Match route
-    let result = match router.match_route(&method, &path) {
+    // Match route. A miss still runs the middleware chain (CORS preflight,
+    // request ids, logging, security headers) and ends in a 404.
+    let handler: Option<DynHandler> = match router.match_route(&method, &path) {
         Ok((handler, params)) => {
             request.params = params;
-
-            // Run middlewares + handler
-            if middlewares.is_empty() {
-                handler.call(request).await
-            } else {
-                // Create middleware chain
-                let mut chain = middlewares.to_vec();
-
-                // Add final handler as last middleware
-                let final_handler = Arc::new(move |req: Request, _next: Next| {
-                    let h = handler.clone();
-                    async move { h.call(req).await }
-                });
-                chain.push(final_handler as Arc<dyn Middleware>);
-
-                let next = Next::new(Arc::new(chain));
-                next.run(request).await
-            }
+            Some(handler)
         }
-        Err(e) => Err(e),
+        Err(_) => None,
+    };
+
+    let result = if middlewares.is_empty() {
+        dispatch(handler, request).await
+    } else {
+        // Route handler (or the 404) runs as the last link of the chain
+        let mut chain = middlewares.to_vec();
+        let final_handler = Arc::new(move |req: Request, _next: Next| {
+            let handler = handler.clone();
+            async move { dispatch(handler, req).await }
+        });
+        chain.push(final_handler as Arc<dyn Middleware>);
+
+        Next::new(Arc::new(chain)).run(request).await
     };
 
     // Convert Result to Response
@@ -395,4 +436,11 @@ async fn handle_request(
     };
 
     response.into_hyper()
+}
+
+async fn dispatch(handler: Option<DynHandler>, req: Request) -> Result<Response> {
+    match handler {
+        Some(handler) => handler.call(req).await,
+        None => Err(Error::not_found("Route not found")),
+    }
 }

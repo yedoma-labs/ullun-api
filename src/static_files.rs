@@ -35,7 +35,8 @@ impl StaticFileHandler {
             .map_err(|_| Error::not_found("File not found"))?;
 
         if !canonical_path.starts_with(&canonical_root) {
-            return Err(Error::forbidden("Access denied"));
+            // 404 instead of 403: do not reveal whether the target exists
+            return Err(Error::not_found("File not found"));
         }
 
         // Check if it's a directory
@@ -46,7 +47,7 @@ impl StaticFileHandler {
         if metadata.is_dir() {
             // Try to serve index.html
             let index_path = canonical_path.join("index.html");
-            if index_path.exists() {
+            if fs::metadata(&index_path).await.is_ok() {
                 return self.serve_file_content(&index_path).await;
             }
             return Err(Error::forbidden("Directory listing not allowed"));
@@ -105,11 +106,26 @@ mod tests {
 
     #[test]
     fn test_content_type_detection() {
-        assert_eq!(guess_content_type(Path::new("test.html")), "text/html; charset=utf-8");
-        assert_eq!(guess_content_type(Path::new("test.css")), "text/css; charset=utf-8");
-        assert_eq!(guess_content_type(Path::new("test.js")), "application/javascript; charset=utf-8");
-        assert_eq!(guess_content_type(Path::new("test.json")), "application/json");
+        assert_eq!(
+            guess_content_type(Path::new("test.html")),
+            "text/html; charset=utf-8"
+        );
+        assert_eq!(
+            guess_content_type(Path::new("test.css")),
+            "text/css; charset=utf-8"
+        );
+        assert_eq!(
+            guess_content_type(Path::new("test.js")),
+            "application/javascript; charset=utf-8"
+        );
+        assert_eq!(
+            guess_content_type(Path::new("test.json")),
+            "application/json"
+        );
         assert_eq!(guess_content_type(Path::new("test.png")), "image/png");
-        assert_eq!(guess_content_type(Path::new("unknown")), "application/octet-stream");
+        assert_eq!(
+            guess_content_type(Path::new("unknown")),
+            "application/octet-stream"
+        );
     }
 }

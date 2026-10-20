@@ -30,7 +30,7 @@ Expected binary size: ~1-2 MB (depending on your code)
 
 ```dockerfile
 # Build stage
-FROM rust:1.96 as builder
+FROM rust:1.99 AS builder
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src

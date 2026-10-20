@@ -2,32 +2,83 @@
 
 ## Benchmarks
 
-### Routing Performance
+Two [criterion](https://github.com/bheisler/criterion.rs) suites, both in `benches/`:
 
-**Static routes (100 routes):**
-- Insert: ~500ns per route
-- Match: ~50-100ns per lookup
+```bash
+cargo bench --bench router_benchmark   # micro-benchmarks, no I/O
+cargo bench --bench http_benchmark     # real TCP round trips, in-process server + hyper client
+```
 
-**Dynamic routes (with parameters):**
-- One parameter: ~80-120ns
-- Multiple parameters: ~100-150ns
+HTML reports land in `target/criterion/report/index.html`. Compare changes with
+`cargo bench -- --save-baseline before` and `cargo bench -- --baseline before`.
 
-### JSON Serialization
+### Reference results
 
-**Small payload (< 1KB):**
-- Serialize: ~1-2µs
-- Deserialize: ~2-3µs
+Measured with ullun-api 0.2.0 + unreleased fixes, Rust 1.99.0 (`bench` profile, no LTO),
+Intel Core i7-8750H (6C/12T) laptop, macOS 15.8, other apps running. Median of the
+criterion confidence interval; treat them as order-of-magnitude, not as a promise.
+Re-run on your own hardware before drawing conclusions.
 
-**Medium payload (1-10KB):**
-- Serialize: ~5-10µs
-- Deserialize: ~10-20µs
+**Routing** (`router_benchmark`, 100 static routes + 2 parameterised):
 
-### Request Handling
+| Benchmark | Time |
+|-----------|------|
+| insert 10 routes | 5.3 µs (~0.5 µs/route) |
+| insert 100 routes | 55 µs (~0.55 µs/route) |
+| match static route | 125 ns |
+| match 1 path param | 327 ns |
+| match 2 path params | 485 ns |
 
-**End-to-end (hello world):**
-- Throughput: 50,000+ req/s
-- Latency p50: <1ms
-- Latency p99: <5ms
+A match includes the method dispatch, `Params` construction (owned `String`s) and the handler `Arc` clone, not only the `matchit` lookup.
+
+**Request / response building:**
+
+| Benchmark | Time |
+|-----------|------|
+| `Request::new` with 4 query params | 1.06 µs |
+| `req.json::<T>()` (2 fields) | 225 ns |
+| parse `Cookie` header (4 cookies) | 1.56 µs |
+| `Response::text` | 515 ns |
+| `Response::json` + `Set-Cookie` | 1.06 µs |
+| `Response::from_error` | 971 ns |
+| `Response::json` small / medium (3 users) | 0.90 µs / 4.1 µs |
+
+**Middleware chain** (`Next::run`, async fn layers that only call `next`, plus final handler):
+
+| Layers | Time | Per layer |
+|--------|------|-----------|
+| 0 | 867 ns | - |
+| 1 | 1.07 µs | ~0.2 µs |
+| 3 | 1.54 µs | ~0.22 µs |
+| 10 | 3.27 µs | ~0.24 µs |
+
+The 0-layer baseline includes building the `Request`. Every layer costs one `Arc` clone and one boxed future.
+
+**End-to-end HTTP over loopback** (`http_benchmark`, keep-alive, `bench` profile, client and server share one 12-thread tokio runtime):
+
+| Benchmark | Round trip |
+|-----------|-----------|
+| `GET /hello` (text) | 74 µs |
+| `GET /users/{id}` (JSON) | 128-192 µs (noisy run) |
+| `POST /users` (JSON echo) | 88 µs |
+| `GET /nope` (404) | 68 µs |
+| `GET /hello` + 3 middlewares | 70 µs |
+| `POST /users` + 3 middlewares | 71 µs |
+| 32 connections x 50 requests, `GET /hello` | **~71k req/s** (22.6 ms per 1600 requests) |
+
+What this says: the framework's own work (routing, middleware, JSON) is in the low
+microseconds and disappears behind the ~70 µs that syscalls, loopback TCP and the
+hyper client cost; 3 middlewares are not measurable end-to-end. What it does not say:
+the load generator runs on the same machine and competes for the same cores, so
+real throughput on a dedicated server with an external generator (`wrk`, `hey`, see
+below) will be higher. Latency percentiles (p50/p99) are not measured by criterion;
+use `wrk --latency` for those.
+
+### Binary size
+
+`cargo build --release --example hello_world` produces a ~1.6 MB executable
+(macOS x86_64, default release profile); add `lto = true`, `codegen-units = 1`,
+`strip = true` to shrink it.
 
 ## Optimization Tips
 
@@ -54,7 +105,7 @@ App::new()
 
 ### 3. Minimize Middleware
 
-Each middleware adds ~10-50ns overhead.
+Each middleware layer costs roughly 0.2 µs (one `Arc` clone + one boxed future), see the table above.
 
 ```rust
 // Use only necessary middleware
@@ -261,9 +312,9 @@ async fn monitored_handler(req: Request) -> Result<Response> {
 
 ### Vertical Scaling
 
-- **4 CPU cores:** ~200k req/s
-- **8 CPU cores:** ~400k req/s
-- **16 CPU cores:** ~800k req/s
+The server is a tokio multi-thread runtime, so it uses all cores by default. Measure
+your own handler mix with `wrk`/`hey` at 1, 2, 4... cores (`taskset`, container CPU limits)
+before sizing; throughput depends mostly on what your handlers do (database, I/O).
 
 ### Horizontal Scaling
 
@@ -276,14 +327,8 @@ Load Balancer (nginx)
     +-- ...
 ```
 
-### Expected Throughput
-
-| Setup | CPU | Memory | Req/s | p99 Latency |
-|-------|-----|--------|-------|-------------|
-| Single instance | 1 core | 256MB | 50k | <5ms |
-| Single instance | 2 cores | 512MB | 100k | <5ms |
-| Single instance | 4 cores | 1GB | 200k | <10ms |
-| 3 instances | 4 cores each | 1GB each | 600k | <10ms |
+The framework keeps no cross-request state, so instances scale out as long as your own
+state (sessions, rate-limit counters, idempotency keys) lives in a shared store.
 
 ## Profiling
 
@@ -323,15 +368,9 @@ tokio-console
 
 ## Comparison to Other Frameworks
 
-| Framework | Req/s (simple) | Latency p99 | Memory |
-|-----------|----------------|-------------|--------|
-| **ullun-api** | **50k+** | **<5ms** | **2-5MB** |
-| Actix-web | 60k+ | <5ms | 3-8MB |
-| Axum | 45k+ | <10ms | 3-6MB |
-| Rocket | 30k+ | <15ms | 5-10MB |
-| warp | 40k+ | <10ms | 4-8MB |
-
-*Benchmarks are approximate and depend on workload*
+No cross-framework numbers are published here. Comparable results need the same
+hardware, load generator, handler and build profile for every framework; if you
+run such a comparison, share the setup and open a PR.
 
 ## Performance Checklist
 
