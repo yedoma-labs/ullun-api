@@ -201,3 +201,105 @@ async fn oversized_messages_close_the_connection() {
         }
     }
 }
+
+fn quick_heartbeat() -> WsOptions {
+    WsOptions {
+        ping_interval: Some(std::time::Duration::from_millis(30)),
+        idle_timeout: Some(std::time::Duration::from_millis(150)),
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn the_server_pings_and_keeps_responsive_clients() {
+    let app = App::new().ws_with(
+        "/hb",
+        quick_heartbeat(),
+        |_req: Request, mut s: WebSocket| async move {
+            while let Some(Ok(msg)) = s.recv().await {
+                if let Message::Text(t) = msg {
+                    let _ = s.send_text(format!("echo {t}")).await;
+                }
+            }
+        },
+    );
+    let addr = spawn(app).await;
+    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/hb"))
+        .await
+        .unwrap();
+
+    // reading answers pings automatically; keep reading well past the idle timeout
+    let mut pings = 0;
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(500);
+    while let Ok(Some(msg)) = tokio::time::timeout_at(deadline, ws.next()).await {
+        if matches!(msg, Ok(Wire::Ping(_))) {
+            pings += 1;
+        }
+    }
+    assert!(pings >= 3, "expected regular pings, saw {pings}");
+    // still connected after more than three idle timeouts
+    ws.send(Wire::text("still here")).await.unwrap();
+    loop {
+        match ws.next().await.unwrap().unwrap() {
+            Wire::Text(t) => {
+                assert_eq!(t.as_str(), "echo still here");
+                break;
+            }
+            _ => continue,
+        }
+    }
+}
+
+#[tokio::test]
+async fn silent_peers_are_disconnected_after_the_idle_timeout() {
+    let (ended_tx, ended_rx) = tokio::sync::oneshot::channel::<()>();
+    let ended = std::sync::Arc::new(tokio::sync::Mutex::new(Some(ended_tx)));
+    let app = App::new().ws_with(
+        "/hb",
+        quick_heartbeat(),
+        move |_req: Request, mut s: WebSocket| {
+            let ended = ended.clone();
+            async move {
+                while let Some(Ok(_)) = s.recv().await {}
+                if let Some(tx) = ended.lock().await.take() {
+                    let _ = tx.send(());
+                }
+            }
+        },
+    );
+    let addr = spawn(app).await;
+    // connected, but never polled again: no pongs, no traffic
+    let (_ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/hb"))
+        .await
+        .unwrap();
+
+    tokio::time::timeout(std::time::Duration::from_secs(5), ended_rx)
+        .await
+        .expect("the silent connection was never closed")
+        .unwrap();
+}
+
+#[tokio::test]
+async fn json_helper_and_close_codes() {
+    let app = App::new().ws("/j", |_req: Request, mut s: WebSocket| async move {
+        let _ = s
+            .send_json(&serde_json::json!({ "type": "hello", "n": 1 }))
+            .await;
+        let _ = s.close_with(1008, "policy violation").await;
+    });
+    let addr = spawn(app).await;
+    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/j"))
+        .await
+        .unwrap();
+
+    let first = ws.next().await.unwrap().unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(first.to_text().unwrap()).unwrap();
+    assert_eq!(parsed, serde_json::json!({ "type": "hello", "n": 1 }));
+    match ws.next().await {
+        Some(Ok(Wire::Close(Some(frame)))) => {
+            assert_eq!(u16::from(frame.code), 1008);
+            assert_eq!(frame.reason.as_str(), "policy violation");
+        }
+        other => panic!("expected a close frame, got {other:?}"),
+    }
+}

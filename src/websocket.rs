@@ -64,6 +64,13 @@ pub struct WsOptions {
     /// Extra `Origin` values (e.g. `https://app.example.com`) that may connect
     /// besides the host serving the endpoint
     pub allowed_origins: Vec<String>,
+    /// Send a ping this often while [`WebSocket::recv`] is waiting (default
+    /// 30 s, `None` = never). Browsers answer automatically, which keeps
+    /// proxies from dropping idle connections.
+    pub ping_interval: Option<std::time::Duration>,
+    /// Close the connection when nothing at all (message, pong) arrived for this
+    /// long (default 90 s, `None` = never), so dead peers do not pile up
+    pub idle_timeout: Option<std::time::Duration>,
 }
 
 impl Default for WsOptions {
@@ -71,6 +78,8 @@ impl Default for WsOptions {
         Self {
             max_message_size: 1024 * 1024,
             allowed_origins: Vec::new(),
+            ping_interval: Some(std::time::Duration::from_secs(30)),
+            idle_timeout: Some(std::time::Duration::from_secs(90)),
         }
     }
 }
@@ -78,25 +87,92 @@ impl Default for WsOptions {
 /// An upgraded connection
 pub struct WebSocket {
     inner: WebSocketStream<TokioIo<Upgraded>>,
+    ping: Option<tokio::time::Interval>,
+    idle_timeout: Option<std::time::Duration>,
+    last_seen: std::time::Instant,
 }
 
 impl WebSocket {
-    /// Next message, or `None` once the connection is closed
+    fn new(inner: WebSocketStream<TokioIo<Upgraded>>, options: &WsOptions) -> Self {
+        let ping = options.ping_interval.map(|every| {
+            let mut i = tokio::time::interval_at(tokio::time::Instant::now() + every, every);
+            i.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            i
+        });
+        Self {
+            inner,
+            ping,
+            idle_timeout: options.idle_timeout,
+            last_seen: std::time::Instant::now(),
+        }
+    }
+
+    /// Next message, or `None` once the connection is closed (by either side, or
+    /// because the peer went silent for [`WsOptions::idle_timeout`])
+    ///
+    /// Keep-alive pings are sent from inside this call, so a handler should
+    /// spend most of its time waiting here (or in a `select!` that includes it).
     pub async fn recv(&mut self) -> Option<Result<Message>> {
         loop {
-            return match self.inner.next().await? {
-                Ok(WsMessage::Text(t)) => Some(Ok(Message::Text(t.as_str().to_owned()))),
-                Ok(WsMessage::Binary(b)) => Some(Ok(Message::Binary(b.to_vec()))),
-                Ok(WsMessage::Ping(b)) => Some(Ok(Message::Ping(b.to_vec()))),
-                Ok(WsMessage::Pong(b)) => Some(Ok(Message::Pong(b.to_vec()))),
-                Ok(WsMessage::Close(_)) => Some(Ok(Message::Close)),
-                Ok(WsMessage::Frame(_)) => continue,
-                Err(tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed) => {
-                    None
+            let Self {
+                inner,
+                ping,
+                idle_timeout,
+                last_seen,
+            } = self;
+            let tick = async {
+                match ping {
+                    Some(interval) => {
+                        interval.tick().await;
+                    }
+                    None => std::future::pending::<()>().await,
                 }
-                Err(e) => Some(Err(Error::bad_request(format!("WebSocket: {}", e)))),
             };
+            tokio::select! {
+                incoming = inner.next() => {
+                    *last_seen = std::time::Instant::now();
+                    return match incoming? {
+                        Ok(WsMessage::Text(t)) => Some(Ok(Message::Text(t.as_str().to_owned()))),
+                        Ok(WsMessage::Binary(b)) => Some(Ok(Message::Binary(b.to_vec()))),
+                        Ok(WsMessage::Ping(b)) => Some(Ok(Message::Ping(b.to_vec()))),
+                        Ok(WsMessage::Pong(b)) => Some(Ok(Message::Pong(b.to_vec()))),
+                        Ok(WsMessage::Close(_)) => Some(Ok(Message::Close)),
+                        Ok(WsMessage::Frame(_)) => continue,
+                        Err(tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed) => None,
+                        Err(e) => Some(Err(Error::bad_request(format!("WebSocket: {}", e)))),
+                    };
+                }
+                _ = tick => {
+                    if idle_timeout.is_some_and(|limit| last_seen.elapsed() >= limit) {
+                        let _ = inner.close(None).await;
+                        return None;
+                    }
+                    if inner.send(WsMessage::Ping(Vec::new().into())).await.is_err() {
+                        return None;
+                    }
+                }
+            }
         }
+    }
+
+    /// Send `value` as a JSON text message
+    pub async fn send_json<T: serde::Serialize>(&mut self, value: &T) -> Result<()> {
+        let text = serde_json::to_string(value)
+            .map_err(|e| Error::internal(format!("WebSocket JSON: {}", e)))?;
+        self.send_text(text).await
+    }
+
+    /// Close with a status code (e.g. 1008 policy violation, 1009 message too
+    /// big, 1001 going away) and a short reason
+    pub async fn close_with(&mut self, code: u16, reason: &str) -> Result<()> {
+        use tungstenite::protocol::frame::{coding::CloseCode, CloseFrame};
+        self.inner
+            .close(Some(CloseFrame {
+                code: CloseCode::from(code),
+                reason: reason.to_string().into(),
+            }))
+            .await
+            .map_err(|e| Error::internal(format!("WebSocket close: {}", e)))
     }
 
     pub async fn send(&mut self, message: Message) -> Result<()> {
@@ -205,6 +281,7 @@ where
         };
 
         let handler = self.handler.clone();
+        let options = self.options.clone();
         let config = WebSocketConfig::default()
             .max_message_size(Some(self.options.max_message_size))
             .max_frame_size(Some(self.options.max_message_size));
@@ -218,7 +295,7 @@ where
                 Some(config),
             )
             .await;
-            handler(req, WebSocket { inner }).await;
+            handler(req, WebSocket::new(inner, &options)).await;
         });
 
         let mut res = Response::new(http::StatusCode::SWITCHING_PROTOCOLS)
