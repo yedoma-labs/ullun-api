@@ -48,6 +48,8 @@
 
 **Secrets and comparisons** - `ullun::security` provides CSPRNG tokens (`random_token`) and `constant_time_eq`; use them for session ids, API keys and delete tokens. Hash passwords with argon2 (see `examples/taskboard`).
 
+**File uploads** - Never build a path from the client's file name: `multipart::sanitize_filename` is for display and download names, store under a generated id. Serve user content as `Content-Disposition: attachment` with `X-Content-Type-Options: nosniff` and a sandboxing CSP unless the type is known to be inert (images, PDF, media). Cap sizes per file and per user (`App::body_limit`, quotas), and write atomically. `examples/drive` shows all of this. `serve_static` never serves dotfiles and rejects encoded traversal.
+
 **Server-side requests (SSRF)** - If your service fetches URLs that users or admins provide, resolve the host yourself, reject loopback/private/link-local/CGNAT addresses (including IPv4-mapped IPv6) and connect to the vetted address only, as `examples/statuspage` does.
 
 **Rate Limiting** - `RateLimiter` middleware (per instance, in memory)

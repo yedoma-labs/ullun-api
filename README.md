@@ -287,6 +287,34 @@ let short_code = random_alphanumeric(7)?;          // uniform [A-Za-z0-9]
 let ok = constant_time_eq(given.as_bytes(), expected.as_bytes());   // for API keys, delete tokens, ...
 ```
 
+### File Uploads and Downloads
+
+```rust
+async fn upload(req: Request) -> Result<Response> {
+    let form = req.multipart()?;                              // 415 / 400 / 413 on bad input
+    let file = form.file("avatar").ok_or_else(|| Error::bad_request("avatar is required"))?;
+    let shown_name = file.safe_filename().unwrap_or_else(|| "file".into());   // never a path!
+    // store the bytes under a name YOU generate (random_alphanumeric), not the client's
+    Ok(Response::redirect("/profile"))
+}
+
+async fn download(req: Request) -> Result<Response> {
+    // streams large files; Range / If-None-Match / If-Modified-Since / HEAD all work
+    serve_file(&req, path_you_chose, &FileOptions::new().attachment("report.pdf")).await
+}
+
+App::new()
+    .max_body_size(Some(64 * 1024))                           // small default ...
+    .body_limit("/upload", Some(25 << 20))                    // ... bigger where uploads happen
+    .serve_static("/assets", "public")                        // dotfiles hidden, traversal-proof
+```
+
+Uploaded HTML, SVG and scripts must never be served inline from your own origin: send them as `attachment` (see `examples/drive`).
+
+### HEAD, OPTIONS and 405
+
+`HEAD` is answered by the `GET` handler (headers only). A known path with the wrong method gets `405` with an `Allow` header, and `OPTIONS` on a known path answers `204` with `Allow`. CORS preflights are still handled by the `cors` middleware.
+
 ### Streaming and Server-Sent Events
 
 ```rust
@@ -558,6 +586,7 @@ Complete services that run as they are and are covered by integration tests (`te
 | [`shortener`](examples/shortener) | `cargo run --example shortener` | URL shortener: API-key management API, public redirects, click counting, expiry, per-key rate limit, JSON file persistence, OpenAPI |
 | [`taskboard`](examples/taskboard) (`jwt`) | `DEV=1 cargo run --example taskboard --features jwt` | REST API: registration/login (argon2 + JWT), per-user projects and tasks, 422 field errors, filter/sort/pagination, ETag + If-Match, login throttling, OpenAPI + Swagger UI |
 | [`statuspage`](examples/statuspage) | `DEV=1 cargo run --example statuspage` | Uptime monitor: background scheduler, HTTP/TCP checks with SSRF protection, public status page with live Server-Sent Events, admin API, graceful SIGTERM shutdown |
+| [`drive`](examples/drive) | `DEV=1 cargo run --example drive` | File drive: multipart uploads, per-user quotas, resumable downloads (Range), expiring share links with download limits, sandboxed risky types, per-route body limits |
 | [`pastebin`](examples/pastebin) | `cargo run --example pastebin` | Paste service: HTML form + JSON API, escaped views with CSP, expiry, burn-after-read, delete tokens, storage cap, shared rate-limit budget |
 
 Scenarios (each is a self-contained deployment shape):

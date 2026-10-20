@@ -53,7 +53,11 @@ tests/
 ├── example_shortener.rs  # Real-world example apps, run over real HTTP
 ├── example_pastebin.rs   #   (the app modules are included with #[path])
 ├── example_taskboard.rs  #   (feature jwt)
+├── example_drive.rs      #   (multipart uploads, real files on disk)
 ├── example_statuspage.rs #   (real local targets, SSE, scheduler, shutdown)
+├── routing_test.rs       # HEAD, OPTIONS, 405
+├── files_test.rs         # serve_file, ranges, conditional requests, static handler hardening
+├── body_limit_test.rs    # per-route body limits
 ├── conditional_test.rs   # ETag middleware and If-Match preconditions
 ├── streaming_test.rs     # Streaming bodies, SSE, disconnect detection
 ├── shutdown_test.rs      # Background tasks and graceful shutdown
