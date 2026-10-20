@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3](https://github.com/yedoma-labs/ullun-api/compare/v0.2.2...v0.2.3) - 2026-10-20
+
+### Added
+
+- *(examples)* add a pastebin service
+- *(middleware)* implement Middleware for Arc<M>
+- *(examples)* add a URL shortener service
+- *(openapi)* document API key security
+- *(security)* add random tokens and constant-time comparison
+- *(app)* add shared application state
+
+### Other
+
+- document shared state, security helpers and the real-world examples
+
 ## [0.2.2](https://github.com/yedoma-labs/ullun-api/compare/v0.2.1...v0.2.2) - 2026-10-20
 
 ### Added
