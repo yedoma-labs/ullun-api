@@ -54,6 +54,7 @@ pub mod rate_limit;
 pub mod request;
 pub mod response;
 pub mod router;
+pub mod secure;
 pub mod security;
 pub mod session;
 pub mod shutdown;
@@ -61,6 +62,8 @@ pub mod sse;
 pub mod static_files;
 pub mod stream;
 pub mod template;
+#[cfg(feature = "tls")]
+pub mod tls;
 pub mod validate;
 #[cfg(feature = "websocket")]
 pub mod websocket;

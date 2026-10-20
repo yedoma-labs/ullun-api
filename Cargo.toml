@@ -28,7 +28,9 @@ jwt = ["dep:hmac", "dep:sha2", "dep:base64"]
 compression = ["dep:flate2"]
 # WebSocket upgrades (App::ws)
 websocket = ["dep:tokio-tungstenite", "dep:futures-util"]
-full = ["jwt", "compression", "websocket"]
+# HTTPS (rustls with the ring provider), certificate reload, client certificates
+tls = ["dep:tokio-rustls"]
+full = ["jwt", "compression", "websocket", "tls"]
 
 [package.metadata.docs.rs]
 all-features = true
@@ -64,6 +66,7 @@ base64 = { version = "0.23", optional = true }
 flate2 = { version = "1.1", optional = true }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake"], optional = true }
 futures-util = { version = "0.3", default-features = false, features = ["sink"], optional = true }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"], optional = true }
 
 [dev-dependencies]
 tokio-tungstenite = { version = "0.30", features = ["connect"] }
@@ -72,6 +75,8 @@ futures-util = "0.3"
 argon2 = "0.6"
 # pooled HTTP client for the gateway example
 hyper-util = { version = "0.1.21", features = ["client-legacy", "http1", "tokio"] }
+# certificates for the TLS tests and the secure_api example
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
 # HMAC signatures for the webhooks example
 hmac = "0.13"
 sha2 = "0.11"
