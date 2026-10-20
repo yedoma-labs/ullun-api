@@ -46,6 +46,7 @@ pub mod handler;
 pub mod jwt;
 pub mod middleware;
 pub mod multipart;
+pub mod observability;
 pub mod openapi;
 pub mod rate_limit;
 pub mod request;

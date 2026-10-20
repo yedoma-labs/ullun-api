@@ -5,14 +5,21 @@ use crate::handler::DynHandler;
 use crate::openapi::{RouteInfo, RouteKind};
 use crate::request::Params;
 
+/// A registered handler together with the pattern it was registered under
+#[derive(Clone)]
+struct Entry {
+    handler: DynHandler,
+    pattern: std::sync::Arc<str>,
+}
+
 /// HTTP method routing
 #[derive(Default)]
 pub struct Router {
-    get: matchit::Router<DynHandler>,
-    post: matchit::Router<DynHandler>,
-    put: matchit::Router<DynHandler>,
-    delete: matchit::Router<DynHandler>,
-    patch: matchit::Router<DynHandler>,
+    get: matchit::Router<Entry>,
+    post: matchit::Router<Entry>,
+    put: matchit::Router<Entry>,
+    delete: matchit::Router<Entry>,
+    patch: matchit::Router<Entry>,
     registered: Vec<RouteInfo>,
 }
 
@@ -48,7 +55,13 @@ impl Router {
         };
 
         router
-            .insert(path, handler)
+            .insert(
+                path,
+                Entry {
+                    handler,
+                    pattern: path.into(),
+                },
+            )
             .map_err(|e| Error::internal(format!("Failed to insert route: {}", e)))?;
 
         self.registered.push(RouteInfo {
@@ -62,7 +75,7 @@ impl Router {
     /// Methods with a route for `path`, in a fixed order, including the
     /// implicit `HEAD` (next to `GET`) and `OPTIONS`. Empty when the path is unknown.
     pub fn allowed_methods(&self, path: &str) -> Vec<&'static str> {
-        let tables: [(&'static str, &matchit::Router<DynHandler>); 5] = [
+        let tables: [(&'static str, &matchit::Router<Entry>); 5] = [
             ("GET", &self.get),
             ("POST", &self.post),
             ("PUT", &self.put),
@@ -89,6 +102,17 @@ impl Router {
     }
 
     pub fn match_route(&self, method: &str, path: &str) -> Result<(DynHandler, Params)> {
+        self.match_route_with_pattern(method, path)
+            .map(|(handler, params, _)| (handler, params))
+    }
+
+    /// Like [`Router::match_route`], also returning the pattern the route was
+    /// registered under (`/users/{id}`), a low-cardinality name for the route
+    pub fn match_route_with_pattern(
+        &self,
+        method: &str,
+        path: &str,
+    ) -> Result<(DynHandler, Params, std::sync::Arc<str>)> {
         let router = match method.to_uppercase().as_str() {
             // HEAD is answered by the GET handler, the body is dropped afterwards
             "GET" | "HEAD" => &self.get,
@@ -108,7 +132,11 @@ impl Router {
             params.insert(key.to_string(), value.to_string());
         }
 
-        Ok((matched.value.clone(), params))
+        Ok((
+            matched.value.handler.clone(),
+            params,
+            matched.value.pattern.clone(),
+        ))
     }
 }
 
