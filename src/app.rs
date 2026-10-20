@@ -519,7 +519,7 @@ async fn handle_request(
     req: hyper::Request<hyper::body::Incoming>,
     peer: SocketAddr,
     shared: Arc<Shared>,
-) -> hyper::Response<http_body_util::Full<bytes::Bytes>> {
+) -> hyper::Response<crate::response::HyperBody> {
     let Shared {
         router,
         middlewares,

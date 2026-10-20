@@ -12,6 +12,29 @@ pub struct Response {
     pub headers: http::HeaderMap,
     pub body: Bytes,
     cookies: Vec<Cookie>,
+    stream: Option<tokio::sync::mpsc::Receiver<Bytes>>,
+}
+
+/// Body type of everything sent to hyper: buffered or streamed
+pub(crate) type HyperBody = http_body_util::combinators::BoxBody<Bytes, std::convert::Infallible>;
+
+/// Chunks arriving through a channel, ended when every sender is dropped
+struct ChannelBody {
+    rx: tokio::sync::mpsc::Receiver<Bytes>,
+}
+
+impl hyper::body::Body for ChannelBody {
+    type Data = Bytes;
+    type Error = std::convert::Infallible;
+
+    fn poll_frame(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<std::result::Result<hyper::body::Frame<Bytes>, Self::Error>>> {
+        self.rx
+            .poll_recv(cx)
+            .map(|chunk| chunk.map(|b| Ok(hyper::body::Frame::data(b))))
+    }
 }
 
 impl Response {
@@ -21,7 +44,43 @@ impl Response {
             headers: http::HeaderMap::new(),
             body: Bytes::new(),
             cookies: Vec::new(),
+            stream: None,
         }
+    }
+
+    /// A response whose body is produced while it is being sent
+    ///
+    /// Returns the sender for the body chunks and the response; set status and
+    /// headers on the response as usual. The body ends when the last
+    /// [`BodySender`](crate::stream::BodySender) is dropped, and `send` fails
+    /// with [`Disconnected`](crate::stream::Disconnected) once the client is gone.
+    /// Middleware that rewrites `body` (compression, ETags) leaves streams alone.
+    ///
+    /// ```
+    /// use ullun::prelude::*;
+    ///
+    /// async fn countdown(_req: Request) -> Result<Response> {
+    ///     let (tx, res) = Response::stream();
+    ///     tokio::spawn(async move {
+    ///         for n in (1..=3).rev() {
+    ///             if tx.send(format!("{n}\n")).await.is_err() {
+    ///                 return; // client went away
+    ///             }
+    ///         }
+    ///     });
+    ///     Ok(res.with_header("content-type", "text/plain"))
+    /// }
+    /// ```
+    pub fn stream() -> (crate::stream::BodySender, Self) {
+        let (tx, rx) = tokio::sync::mpsc::channel(16);
+        let mut res = Self::ok();
+        res.stream = Some(rx);
+        (crate::stream::BodySender::new(tx), res)
+    }
+
+    /// Whether the body is streamed instead of held in `body`
+    pub fn is_streaming(&self) -> bool {
+        self.stream.is_some()
     }
 
     /// Set a cookie
@@ -124,7 +183,8 @@ impl Response {
             .with_body(body_bytes)
     }
 
-    pub(crate) fn into_hyper(self) -> hyper::Response<http_body_util::Full<Bytes>> {
+    pub(crate) fn into_hyper(self) -> hyper::Response<HyperBody> {
+        use http_body_util::BodyExt;
         let mut builder = hyper::Response::builder().status(self.status);
 
         for (key, value) in self.headers.iter() {
@@ -136,17 +196,23 @@ impl Response {
             builder = builder.header("set-cookie", cookie.to_header_value());
         }
 
-        builder
-            .body(http_body_util::Full::new(self.body))
-            .unwrap_or_else(|e| {
-                eprintln!("Failed to build response: {}", e);
-                hyper::Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(http_body_util::Full::new(Bytes::from(
-                        "Internal Server Error",
-                    )))
-                    .unwrap()
-            })
+        let body: HyperBody = match self.stream {
+            Some(rx) => ChannelBody { rx }.boxed(),
+            None => http_body_util::Full::new(self.body)
+                .map_err(|never| match never {})
+                .boxed(),
+        };
+        builder.body(body).unwrap_or_else(|e| {
+            eprintln!("Failed to build response: {}", e);
+            hyper::Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(
+                    http_body_util::Full::new(Bytes::from("Internal Server Error"))
+                        .map_err(|never| match never {})
+                        .boxed(),
+                )
+                .unwrap()
+        })
     }
 }
 

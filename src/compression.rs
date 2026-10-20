@@ -75,6 +75,7 @@ impl Middleware for Compression {
         };
 
         if is_head
+            || res.is_streaming()
             || res.status.is_informational()
             || res.status == http::StatusCode::NO_CONTENT
             || res.status == http::StatusCode::NOT_MODIFIED
