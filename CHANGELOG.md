@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3](https://github.com/yedoma-labs/ullun-api/compare/v0.3.2...v0.3.3) - 2026-10-20
+
+### Added
+
+- *(examples)* add a blog with admin area
+- *(template)* support {{else}} in {{#each}}
+- *(session)* add server-side sessions and CSRF protection
+
+### Other
+
+- document sessions, CSRF and the blog example
+
 ## [0.3.2](https://github.com/yedoma-labs/ullun-api/compare/v0.3.1...v0.3.2) - 2026-10-20
 
 ### Added
