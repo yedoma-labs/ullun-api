@@ -2,7 +2,7 @@
 
 use crate::error::{Error, Result};
 use crate::handler::{DynHandler, Handler, HandlerWithParams};
-use crate::middleware::{Middleware, Next};
+use crate::middleware::{Layered, Middleware, Next};
 use crate::request::{Params, Request};
 use crate::response::Response;
 use crate::router::Router;
@@ -49,18 +49,18 @@ impl App {
         let group = RouteGroup::new(prefix);
         let group = configure(group);
 
-        // Register all routes with prefix
+        // Group middlewares wrap only this group's routes (inside the global ones)
+        let middlewares = group.middlewares;
         for (method, path, handler) in group.routes {
             let full_path = format!("{}{}", group.prefix, path);
+            let handler: DynHandler = if middlewares.is_empty() {
+                handler
+            } else {
+                Arc::new(Layered::new(middlewares.clone(), handler))
+            };
             if let Err(e) = self.router.insert(&method, &full_path, handler) {
                 panic!("Failed to register {} route {}: {}", method, full_path, e);
             }
-        }
-
-        // Note: Group-level middlewares not yet supported - would apply globally
-        // Use route-specific middleware wrapping instead for now
-        if !group.middlewares.is_empty() {
-            eprintln!("Warning: RouteGroup.middleware() is not yet implemented. Middlewares will be ignored.");
         }
 
         self
@@ -345,6 +345,10 @@ impl RouteGroup {
         self
     }
 
+    /// Add middleware that runs only for the routes of this group
+    ///
+    /// It runs after the application-wide middleware, in registration order,
+    /// regardless of whether it is added before or after the routes.
     pub fn middleware<M>(mut self, middleware: M) -> Self
     where
         M: Middleware,
