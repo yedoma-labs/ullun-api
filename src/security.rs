@@ -256,10 +256,9 @@ mod tests {
                 .to_string(),
             "target address 169.254.169.254 is not public"
         );
-        assert_eq!(
-            resolve_public("[::1]", 80, false).await.unwrap_err(),
-            ResolveError::Resolution
-        );
+        // bracketed literals are not hostnames: resolvers disagree whether they parse
+        // (Windows accepts "[::1]"), but none of them may yield a usable address
+        assert!(resolve_public("[::1]", 80, false).await.is_err());
         assert_eq!(
             resolve_public("::1", 80, false).await,
             Err(ResolveError::NotPublic("::1".parse().unwrap()))
