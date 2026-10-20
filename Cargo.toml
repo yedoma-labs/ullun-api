@@ -93,3 +93,18 @@ path = "examples/full_api.rs"
 [[example]]
 name = "todo_api"
 path = "examples/todo_api.rs"
+
+[[example]]
+name = "jwt_auth"
+path = "examples/jwt_auth.rs"
+required-features = ["jwt"]
+
+[[example]]
+name = "realtime_chat"
+path = "examples/realtime_chat.rs"
+required-features = ["websocket"]
+
+[[example]]
+name = "templates_site"
+path = "examples/templates_site.rs"
+required-features = ["compression"]
