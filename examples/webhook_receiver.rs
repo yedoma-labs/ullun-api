@@ -19,6 +19,7 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use ullun::prelude::*;
+use ullun::security::constant_time_eq;
 
 const SECRET: &str = "s3cret";
 
@@ -29,15 +30,6 @@ struct Event {
     kind: String,
     #[serde(default)]
     amount: u64,
-}
-
-/// Compare without early exit so response timing does not leak the secret.
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    let mut diff = (a.len() ^ b.len()) as u8;
-    for i in 0..a.len().max(b.len()) {
-        diff |= a.get(i).copied().unwrap_or(0) ^ b.get(i).copied().unwrap_or(0);
-    }
-    diff == 0
 }
 
 #[tokio::main]

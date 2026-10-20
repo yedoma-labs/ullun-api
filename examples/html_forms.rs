@@ -6,16 +6,17 @@
 //! - cookie session guarding `/dashboard`
 //!
 //! The session store is in memory and the "password" is a demo; use a real
-//! hasher (argon2) and a persistent store in production.
+//! hasher (argon2) and a persistent store in production. Session ids come from
+//! the OS CSPRNG (`ullun::security::random_token`).
 //!
 //! Port: set PORT (default 3000)
 //! Run:  cargo run --example html_forms   then open http://localhost:3000
 
 use std::collections::HashMap;
-use std::hash::{BuildHasher, Hasher};
 use std::sync::{Arc, Mutex};
 use ullun::cookies::SameSite;
 use ullun::prelude::*;
+use ullun::security::random_token;
 
 type Sessions = Arc<Mutex<HashMap<String, String>>>;
 
@@ -48,17 +49,6 @@ fn redirect(to: &str) -> Response {
 struct LoginForm {
     user: String,
     password: String,
-}
-
-/// Unguessable session id from std's randomly seeded SipHash. Good enough for
-/// a demo; use a CSPRNG (`getrandom`, `rand`) for real sessions.
-fn new_session_id() -> String {
-    let rnd = |_| {
-        std::collections::hash_map::RandomState::new()
-            .build_hasher()
-            .finish()
-    };
-    format!("{:016x}{:016x}", rnd(0), rnd(1))
 }
 
 fn flash_cookie(msg: &str) -> Cookie {
@@ -106,7 +96,7 @@ async fn main() {
             if user.is_empty() || f.password != "demo" {
                 return Ok(redirect("/").cookie(flash_cookie("Wrong name or password")));
             }
-            let sid = new_session_id();
+            let sid = random_token(16)?;
             s.lock()
                 .expect("session lock poisoned")
                 .insert(sid.clone(), user);

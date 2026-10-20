@@ -1210,6 +1210,7 @@ dependencies = [
  "criterion",
  "flate2",
  "futures-util",
+ "getrandom",
  "hmac",
  "http",
  "http-body-util",
