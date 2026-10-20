@@ -91,6 +91,11 @@ impl Call {
         self
     }
 
+    /// `Cookie: name=value`
+    pub fn cookie(self, name: &str, value: &str) -> Self {
+        self.header("cookie", &format!("{name}={value}"))
+    }
+
     pub fn bearer(self, token: &str) -> Self {
         self.header("authorization", &format!("Bearer {token}"))
     }
@@ -206,6 +211,34 @@ impl Reply {
     pub fn json(&self) -> serde_json::Value {
         serde_json::from_slice(&self.body)
             .unwrap_or_else(|e| panic!("not JSON ({e}): {}", self.text()))
+    }
+
+    /// Value of the cookie set by a `Set-Cookie` header of this response
+    /// (`None` if not set; an empty string if it was cleared)
+    pub fn cookie(&self, name: &str) -> Option<String> {
+        self.headers
+            .get_all("set-cookie")
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .find_map(|c| {
+                let first = c.split(';').next()?;
+                let (n, v) = first.split_once('=')?;
+                (n == name).then(|| v.to_string())
+            })
+    }
+
+    /// The raw `Set-Cookie` header for a cookie name (all attributes)
+    pub fn set_cookie(&self, name: &str) -> Option<String> {
+        self.headers
+            .get_all("set-cookie")
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .find(|c| {
+                c.split(';')
+                    .next()
+                    .is_some_and(|f| f.split_once('=').is_some_and(|(n, _)| n == name))
+            })
+            .map(str::to_owned)
     }
 
     pub fn header(&self, name: &str) -> &str {
