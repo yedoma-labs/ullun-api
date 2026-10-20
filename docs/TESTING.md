@@ -53,6 +53,8 @@ tests/
 ├── example_shortener.rs  # Real-world example apps, run over real HTTP
 ├── example_pastebin.rs   #   (the app modules are included with #[path])
 ├── example_taskboard.rs  #   (feature jwt)
+├── example_blog.rs       #   (browser-like: cookie jar, CSRF tokens scraped from HTML)
+├── session_test.rs       # Sessions (timeouts, fixation, isolation) and CSRF
 ├── example_drive.rs      #   (multipart uploads, real files on disk)
 ├── example_statuspage.rs #   (real local targets, SSE, scheduler, shutdown)
 ├── routing_test.rs       # HEAD, OPTIONS, 405
