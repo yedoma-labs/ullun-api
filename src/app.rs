@@ -237,7 +237,7 @@ impl App {
         max_body_size: Option<usize>,
     ) -> Result<()> {
         loop {
-            let (stream, _) = listener
+            let (stream, peer) = listener
                 .accept()
                 .await
                 .map_err(|e| Error::internal(format!("Failed to accept: {}", e)))?;
@@ -255,7 +255,8 @@ impl App {
                             let middlewares = middlewares.clone();
                             async move {
                                 Ok::<_, Infallible>(
-                                    handle_request(req, router, middlewares, max_body_size).await,
+                                    handle_request(req, peer, router, middlewares, max_body_size)
+                                        .await,
                                 )
                             }
                         }),
@@ -360,6 +361,7 @@ impl RouteGroup {
 
 async fn handle_request(
     req: hyper::Request<hyper::body::Incoming>,
+    peer: SocketAddr,
     router: Arc<Router>,
     middlewares: Arc<Vec<Arc<dyn Middleware>>>,
     max_body_size: Option<usize>,
@@ -408,6 +410,8 @@ async fn handle_request(
     };
 
     let mut request = Request::new(parts.method, parts.uri, parts.headers, body_bytes);
+    request.extensions = parts.extensions;
+    request.remote_addr = Some(peer);
 
     // Match route. A miss still runs the middleware chain (CORS preflight,
     // request ids, logging, security headers) and ends in a 404.

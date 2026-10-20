@@ -93,6 +93,11 @@ pub struct Request {
     pub body: bytes::Bytes,
     pub params: Params,
     pub query: Query,
+    /// Typed per-request data; middleware can attach values for handlers
+    /// (authenticated user, request id, ...).
+    pub extensions: http::Extensions,
+    /// Address of the connected peer (the proxy when behind one)
+    pub remote_addr: Option<std::net::SocketAddr>,
     cookies: OnceCell<Cookies>,
 }
 
@@ -115,6 +120,8 @@ impl Request {
             body,
             params: Params::new(),
             query,
+            extensions: http::Extensions::new(),
+            remote_addr: None,
             cookies: OnceCell::new(),
         }
     }
