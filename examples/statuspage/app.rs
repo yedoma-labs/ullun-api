@@ -3,14 +3,13 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, VecDeque};
-use std::net::{IpAddr, SocketAddr};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::net::TcpStream;
 use tokio::sync::{broadcast, Semaphore};
 use ullun::openapi::{schema, OpenApiInfo, Operation};
 use ullun::prelude::*;
-use ullun::security::constant_time_eq;
+use ullun::security::{constant_time_eq, resolve_public};
 use ullun::sse::{sse, Event};
 use ullun::validate::Validator;
 
@@ -237,58 +236,15 @@ impl Store {
 
 // ---- checking ----
 
-/// Resolve and vet the address up front, then connect to exactly that address
-/// (no second lookup that a DNS rebinding trick could point elsewhere).
-async fn resolve(
-    host: &str,
-    port: u16,
-    allow_private: bool,
-) -> std::result::Result<SocketAddr, String> {
-    let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host, port))
-        .await
-        .map_err(|_| "name resolution failed".to_string())?
-        .collect();
-    let addr = addrs.first().copied().ok_or("name resolution failed")?;
-    if !allow_private {
-        // every answer must be public, not just the first one
-        if let Some(bad) = addrs.iter().find(|a| is_private(a.ip())) {
-            return Err(format!("target address {} is not public", bad.ip()));
-        }
-    }
-    Ok(addr)
-}
-
-fn is_private(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => {
-            v4.is_loopback()
-                || v4.is_private()
-                || v4.is_link_local()
-                || v4.is_unspecified()
-                || v4.is_broadcast()
-                || v4.octets()[0] == 0
-                || (v4.octets()[0] == 100 && (64..128).contains(&v4.octets()[1]))
-            // CGNAT
-        }
-        IpAddr::V6(v6) => {
-            if let Some(v4) = v6.to_ipv4_mapped() {
-                return is_private(IpAddr::V4(v4));
-            }
-            v6.is_loopback()
-                || v6.is_unspecified()
-                || (v6.segments()[0] & 0xfe00) == 0xfc00 // unique local
-                || (v6.segments()[0] & 0xffc0) == 0xfe80 // link local
-        }
-    }
-}
-
 async fn check_target(
     target: &Target,
     timeout: Duration,
     allow_private: bool,
 ) -> std::result::Result<String, String> {
     let (host, port) = target.host_port();
-    let addr = resolve(host, port, allow_private).await?;
+    let addr = resolve_public(host, port, allow_private)
+        .await
+        .map_err(|e| e.to_string())?;
     let run = async {
         let stream = TcpStream::connect(addr)
             .await
@@ -409,7 +365,7 @@ async fn create_monitor(req: Request) -> Result<Response> {
     let target = match Target::parse(body.target.trim()) {
         Ok(t) => Some(t),
         Err(e) => {
-            v.error("target", e);
+            v.error("target", e.to_string());
             None
         }
     };
@@ -418,9 +374,9 @@ async fn create_monitor(req: Request) -> Result<Response> {
 
     // refuse private targets at creation too, so the admin gets the error immediately
     let (host, port) = target.host_port();
-    if let Err(e) = resolve(host, port, st.allow_private).await {
+    if let Err(e) = resolve_public(host, port, st.allow_private).await {
         let mut v = Validator::new();
-        v.error("target", e);
+        v.error("target", e.to_string());
         v.finish()?;
     }
 
