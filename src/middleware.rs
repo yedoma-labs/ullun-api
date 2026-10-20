@@ -39,6 +39,15 @@ impl Next {
     }
 }
 
+/// Share one middleware instance between several registrations, e.g. a
+/// `RateLimiter` whose budget spans multiple groups
+#[async_trait]
+impl<M: Middleware + ?Sized> Middleware for Arc<M> {
+    async fn handle(&self, req: Request, next: Next) -> Result<Response> {
+        (**self).handle(req, next).await
+    }
+}
+
 /// A handler wrapped in its own middleware stack (used by route groups)
 pub(crate) struct Layered {
     middlewares: Vec<Arc<dyn Middleware>>,
