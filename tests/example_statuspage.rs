@@ -335,9 +335,13 @@ async fn tcp_checks_and_failure_modes() {
     };
     let id = add_ok(&s, "gone", &format!("tcp://127.0.0.1:{closed_port}")).await;
     let refused = check(&s, id).await.json();
-    assert_eq!(
-        (refused["ok"].as_bool(), refused["detail"].as_str()),
-        (Some(false), Some("connection failed"))
+    assert_eq!(refused["ok"], false);
+    // Windows retries refused connections for about a second, which hits the
+    // 500 ms check timeout first; both are a correct "unreachable" verdict
+    let detail = refused["detail"].as_str().unwrap();
+    assert!(
+        detail == "connection failed" || detail == "timeout",
+        "{detail}"
     );
 
     // accepts, then never answers HTTP
