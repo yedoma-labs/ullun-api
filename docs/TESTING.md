@@ -50,6 +50,7 @@ tests/
 ├── static_files_test.rs  # Static serving, index files, traversal (ephemeral port)
 ├── common/mod.rs         # spawn(app) + fluent HTTP client for tests
 ├── state_test.rs         # Shared application state
+├── example_orders.rs     # Checkout API (CORS, idempotency, limits)
 ├── example_shortener.rs  # Real-world example apps, run over real HTTP
 ├── example_pastebin.rs   #   (the app modules are included with #[path])
 ├── example_taskboard.rs  #   (feature jwt)
@@ -61,6 +62,7 @@ tests/
 ├── observability_test.rs # Request ids, access log, metrics
 ├── example_blog.rs       #   (browser-like: cookie jar, CSRF tokens scraped from HTML)
 ├── cors_test.rs          # CORS (origins, preflight, Vary, credentials) and security headers / CSP nonce
+├── idempotency_test.rs   # Idempotency keys: replay, 409, 422, scoping, 5xx release
 ├── limits_test.rs        # Timeouts, load shedding, connection caps, slowloris
 ├── session_test.rs       # Sessions (timeouts, fixation, isolation) and CSRF
 ├── example_drive.rs      #   (multipart uploads, real files on disk)
