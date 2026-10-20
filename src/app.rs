@@ -698,41 +698,17 @@ async fn handle_request(
     // Convert hyper request to our Request type
     let (parts, body) = req.into_parts();
 
-    // Enforce body size limit during streaming
-    let body_bytes = if let Some(max_size) = max_body_size {
-        // Check Content-Length header first (fast path)
-        if let Some(content_length) = parts.headers.get(http::header::CONTENT_LENGTH) {
-            if let Ok(length_str) = content_length.to_str() {
-                if let Ok(length) = length_str.parse::<usize>() {
-                    if length > max_size {
-                        let error_response = Response::from_error(Error::custom(
-                            413,
-                            format!("Request body too large (max {} bytes)", max_size),
-                        ));
-                        return error_response.into_hyper();
-                    }
-                }
-            }
-        }
-
-        // Limit actual stream reading (prevents bypass via chunked encoding)
-        let limited = http_body_util::Limited::new(body, max_size);
-        match limited.collect().await {
-            Ok(collected) => collected.to_bytes(),
-            Err(_) => {
-                // Body exceeded limit during reading
-                let error_response = Response::from_error(Error::custom(
-                    413,
-                    format!("Request body too large (max {} bytes)", max_size),
-                ));
-                return error_response.into_hyper();
-            }
-        }
-    } else {
-        match body.collect().await {
+    // Enforce the body size limit while reading, so it also holds for chunked
+    // bodies without a Content-Length
+    let body_bytes = match max_body_size {
+        Some(max_size) => match read_limited(body, max_size).await {
+            Ok(bytes) => bytes,
+            Err(too_large) => return too_large.into_hyper(max_size),
+        },
+        None => match body.collect().await {
             Ok(collected) => collected.to_bytes(),
             Err(_) => bytes::Bytes::new(),
-        }
+        },
     };
 
     let mut request = Request::new(parts.method, parts.uri, parts.headers, body_bytes);
@@ -781,6 +757,74 @@ async fn handle_request(
     };
 
     response.into_hyper()
+}
+
+/// Most of a rejected request body that is read and thrown away before the 413
+/// is sent. Answering without reading makes the OS reset the connection on
+/// close, and clients (notably on Windows) then lose the response.
+const DRAIN_CAP: u64 = 8 * 1024 * 1024;
+const DRAIN_TIME: Duration = Duration::from_secs(3);
+
+struct BodyTooLarge;
+
+impl BodyTooLarge {
+    fn into_hyper(self, max_size: usize) -> hyper::Response<crate::response::HyperBody> {
+        Response::from_error(Error::custom(
+            413,
+            format!("Request body too large (max {} bytes)", max_size),
+        ))
+        // the connection is not reusable: unread body bytes may remain
+        .with_header("connection", "close")
+        .into_hyper()
+    }
+}
+
+/// Collect at most `max` bytes; on overflow discard (a bounded amount of) the rest
+async fn read_limited(
+    mut body: hyper::body::Incoming,
+    max: usize,
+) -> std::result::Result<bytes::Bytes, BodyTooLarge> {
+    use bytes::BufMut;
+    use hyper::body::Body;
+
+    // a declared length is rejected before a single byte is buffered
+    if body.size_hint().lower() > max as u64 {
+        drain(&mut body, 0).await;
+        return Err(BodyTooLarge);
+    }
+
+    let mut buf = bytes::BytesMut::new();
+    while let Some(frame) = body.frame().await {
+        let Ok(frame) = frame else {
+            return Ok(bytes::Bytes::new());
+        };
+        if let Ok(data) = frame.into_data() {
+            if buf.len() + data.len() > max {
+                drain(&mut body, (buf.len() + data.len()) as u64).await;
+                return Err(BodyTooLarge);
+            }
+            buf.put(data);
+        }
+    }
+    Ok(buf.freeze())
+}
+
+/// Read and drop up to [`DRAIN_CAP`] bytes (counting `already` read), for at most [`DRAIN_TIME`]
+async fn drain(body: &mut hyper::body::Incoming, already: u64) {
+    let _ = tokio::time::timeout(DRAIN_TIME, async {
+        let mut seen = already;
+        while seen < DRAIN_CAP {
+            match body.frame().await {
+                Some(Ok(frame)) => {
+                    if let Ok(data) = frame.into_data() {
+                        seen += data.len() as u64;
+                    }
+                }
+                _ => return,
+            }
+        }
+    })
+    .await;
 }
 
 /// Limit for `path`: the longest matching prefix rule, else the default
