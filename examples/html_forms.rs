@@ -1,7 +1,7 @@
 //! Scenario: server-rendered HTML with forms, sessions and flash messages
 //!
 //! - HTML pages from plain Rust strings (all user input escaped)
-//! - `application/x-www-form-urlencoded` parsing with `Query`
+//! - `application/x-www-form-urlencoded` parsing with `Request::form`
 //! - Post/Redirect/Get with a one-shot flash cookie
 //! - cookie session guarding `/dashboard`
 //!
@@ -44,10 +44,10 @@ fn redirect(to: &str) -> Response {
     Response::new(http::StatusCode::SEE_OTHER).with_header("location", to)
 }
 
-/// Form bodies use `+` for spaces, which `Query` (URL query semantics) keeps.
-fn form(req: &Request) -> Query {
-    let raw = String::from_utf8_lossy(&req.body).replace('+', " ");
-    Query::parse_query_string(&raw)
+#[derive(Deserialize)]
+struct LoginForm {
+    user: String,
+    password: String,
 }
 
 /// Unguessable session id from std's randomly seeded SipHash. Good enough for
@@ -101,9 +101,9 @@ async fn main() {
     let login = move |req: Request| {
         let s = s.clone();
         async move {
-            let f = form(&req);
-            let user = f.get("user").unwrap_or("").trim().to_string();
-            if user.is_empty() || f.get("password") != Some("demo") {
+            let f: LoginForm = req.form()?;
+            let user = f.user.trim().to_string();
+            if user.is_empty() || f.password != "demo" {
                 return Ok(redirect("/").cookie(flash_cookie("Wrong name or password")));
             }
             let sid = new_session_id();

@@ -41,28 +41,33 @@ impl Default for Params {
     }
 }
 
-/// Query parameters from URL
+/// Query parameters from URL (also used for `application/x-www-form-urlencoded` bodies)
 #[derive(Debug, Clone)]
 pub struct Query {
     inner: HashMap<String, String>,
+    raw: String,
 }
 
 impl Query {
     pub fn new() -> Self {
         Self {
             inner: HashMap::new(),
+            raw: String::new(),
         }
     }
 
+    /// Parse `a=1&b=two`. Keys and values are percent-decoded and `+` is a
+    /// space. Pairs without `=` are kept with an empty value; if a key repeats,
+    /// the last value wins.
     pub fn parse_query_string(query: &str) -> Self {
-        let mut q = Query::new();
-        for pair in query.split('&') {
-            if let Some((key, value)) = pair.split_once('=') {
-                q.inner.insert(
-                    key.to_string(),
-                    urlencoding::decode(value).unwrap_or_default().to_string(),
-                );
-            }
+        let mut q = Query {
+            inner: HashMap::new(),
+            raw: query.to_string(),
+        };
+        for pair in query.split('&').filter(|p| !p.is_empty()) {
+            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+            q.inner
+                .insert(decode_component(key), decode_component(value));
         }
         q
     }
@@ -71,12 +76,25 @@ impl Query {
         self.inner.get(key).map(|s| s.as_str())
     }
 
+    pub fn contains(&self, key: &str) -> bool {
+        self.inner.contains_key(key)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    /// Deserialize into a struct; numbers, booleans and `Option` are converted
+    /// from their string form.
     pub fn parse<T: DeserializeOwned>(&self) -> Result<T> {
-        let value = serde_json::to_value(&self.inner)
-            .map_err(|e| Error::internal(format!("Failed to serialize query params: {}", e)))?;
-        serde_json::from_value(value)
+        serde_urlencoded::from_str(&self.raw)
             .map_err(|e| Error::bad_request(format!("Invalid query params: {}", e)))
     }
+}
+
+fn decode_component(s: &str) -> String {
+    let s = s.replace('+', " ");
+    urlencoding::decode(&s).map(|c| c.into_owned()).unwrap_or(s)
 }
 
 impl Default for Query {
@@ -141,9 +159,131 @@ impl Request {
         })
     }
 
+    /// Parse an `application/x-www-form-urlencoded` body into a struct
+    ///
+    /// Answers `415` for other content types and `400` for values that do not
+    /// fit the target type.
+    pub fn form<T: DeserializeOwned>(&self) -> Result<T> {
+        self.require_form_content_type()?;
+        serde_urlencoded::from_bytes(&self.body)
+            .map_err(|e| Error::bad_request(format!("Invalid form data: {}", e)))
+    }
+
+    /// The same body as decoded key/value access (`+` and `%XX` decoded)
+    pub fn form_data(&self) -> Result<Query> {
+        self.require_form_content_type()?;
+        let text = std::str::from_utf8(&self.body)
+            .map_err(|_| Error::bad_request("Form data is not valid UTF-8"))?;
+        Ok(Query::parse_query_string(text))
+    }
+
+    fn require_form_content_type(&self) -> Result<()> {
+        let is_form = self
+            .headers
+            .get(http::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(|v| {
+                v.split(';')
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .eq_ignore_ascii_case("application/x-www-form-urlencoded")
+            })
+            .unwrap_or(false);
+        if is_form {
+            Ok(())
+        } else {
+            Err(Error::custom(
+                415,
+                "Expected content-type application/x-www-form-urlencoded",
+            ))
+        }
+    }
+
     /// Parse JSON body
     pub fn json<T: DeserializeOwned>(&self) -> Result<T> {
         serde_json::from_slice(&self.body)
             .map_err(|e| Error::bad_request(format!("Invalid JSON: {}", e)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn form_request(content_type: Option<&str>, body: &'static str) -> Request {
+        let mut headers = http::HeaderMap::new();
+        if let Some(ct) = content_type {
+            headers.insert(http::header::CONTENT_TYPE, ct.parse().unwrap());
+        }
+        Request::new(
+            http::Method::POST,
+            "/".parse().unwrap(),
+            headers,
+            bytes::Bytes::from_static(body.as_bytes()),
+        )
+    }
+
+    #[derive(Debug, serde::Deserialize, PartialEq)]
+    struct Signup {
+        name: String,
+        age: u8,
+        newsletter: Option<bool>,
+    }
+
+    #[test]
+    fn query_decodes_keys_values_and_plus() {
+        let q = Query::parse_query_string("q=rust+web&na%20me=a%26b&flag&&x=1");
+        assert_eq!(q.get("q"), Some("rust web"));
+        assert_eq!(q.get("na me"), Some("a&b"));
+        assert_eq!(q.get("flag"), Some(""));
+        assert!(q.contains("x") && !q.is_empty());
+    }
+
+    #[test]
+    fn query_parse_converts_types() {
+        let q = Query::parse_query_string("name=Ann&age=31&newsletter=true");
+        assert_eq!(
+            q.parse::<Signup>().unwrap(),
+            Signup {
+                name: "Ann".into(),
+                age: 31,
+                newsletter: Some(true)
+            }
+        );
+        let bad = Query::parse_query_string("name=Ann&age=old");
+        assert_eq!(bad.parse::<Signup>().unwrap_err().status_code(), 400);
+    }
+
+    #[test]
+    fn form_typed_and_untyped() {
+        let req = form_request(
+            Some("application/x-www-form-urlencoded; charset=UTF-8"),
+            "name=Ann+Lee&age=31",
+        );
+        let signup: Signup = req.form().unwrap();
+        assert_eq!(
+            signup,
+            Signup {
+                name: "Ann Lee".into(),
+                age: 31,
+                newsletter: None
+            }
+        );
+        assert_eq!(req.form_data().unwrap().get("name"), Some("Ann Lee"));
+    }
+
+    #[test]
+    fn form_rejects_wrong_content_type_and_bad_values() {
+        let json = form_request(Some("application/json"), "name=Ann&age=1");
+        assert_eq!(json.form::<Signup>().unwrap_err().status_code(), 415);
+        let none = form_request(None, "name=Ann&age=1");
+        assert_eq!(none.form_data().unwrap_err().status_code(), 415);
+
+        let bad = form_request(
+            Some("application/x-www-form-urlencoded"),
+            "name=Ann&age=300",
+        );
+        assert_eq!(bad.form::<Signup>().unwrap_err().status_code(), 400);
     }
 }
