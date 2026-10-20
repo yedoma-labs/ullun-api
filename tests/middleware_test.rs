@@ -150,3 +150,30 @@ async fn group_middleware_only_wraps_group_routes() {
     let (status, _, body) = send_with(addr, "GET", "/admin/panel", &[("x-admin", "1")]).await;
     assert_eq!((status, body.as_str()), (200, "panel"));
 }
+
+#[derive(Clone, Debug, PartialEq)]
+struct CurrentUser(String);
+
+#[tokio::test]
+async fn middleware_passes_data_via_extensions_and_peer_addr_is_set() {
+    let addr = spawn(
+        App::new()
+            .middleware(|mut req: Request, next: Next| async move {
+                req.extensions.insert(CurrentUser("ann".into()));
+                next.run(req).await
+            })
+            .get("/me", |req: Request| async move {
+                let user = req.extensions.get::<CurrentUser>().cloned();
+                let peer = req.remote_addr.map(|a| a.ip().to_string());
+                Ok(Response::json(serde_json::json!({
+                    "user": user.map(|u| u.0),
+                    "peer": peer,
+                })))
+            }),
+    )
+    .await;
+
+    let (status, _, body) = send(addr, "GET", "/me").await;
+    assert_eq!(status, 200);
+    assert_eq!(body, r#"{"peer":"127.0.0.1","user":"ann"}"#);
+}
