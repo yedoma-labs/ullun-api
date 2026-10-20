@@ -50,6 +50,32 @@ impl Server {
     }
 }
 
+/// A form field for [`Call::multipart`]
+pub enum Field {
+    Text(&'static str, String),
+    File {
+        name: &'static str,
+        filename: String,
+        content_type: &'static str,
+        data: Vec<u8>,
+    },
+}
+
+impl Field {
+    pub fn text(name: &'static str, value: &str) -> Self {
+        Field::Text(name, value.to_string())
+    }
+
+    pub fn file(name: &'static str, filename: &str, data: impl Into<Vec<u8>>) -> Self {
+        Field::File {
+            name,
+            filename: filename.to_string(),
+            content_type: "application/octet-stream",
+            data: data.into(),
+        }
+    }
+}
+
 /// Request under construction
 pub struct Call {
     addr: SocketAddr,
@@ -89,6 +115,46 @@ impl Call {
         self.headers
             .push(("content-type".into(), "text/plain; charset=utf-8".into()));
         self.body = Bytes::from(body.to_string());
+        self
+    }
+
+    /// `multipart/form-data` body, as a browser would send it
+    pub fn multipart(mut self, fields: &[Field]) -> Self {
+        let boundary = "----ullunTestBoundary7MA4YWxkTrZu0gW";
+        let mut body = Vec::new();
+        for field in fields {
+            body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+            match field {
+                Field::Text(name, value) => {
+                    body.extend_from_slice(
+                        format!("Content-Disposition: form-data; name=\"{name}\"\r\n\r\n")
+                            .as_bytes(),
+                    );
+                    body.extend_from_slice(value.as_bytes());
+                }
+                Field::File {
+                    name,
+                    filename,
+                    content_type,
+                    data,
+                } => {
+                    body.extend_from_slice(
+                        format!(
+                            "Content-Disposition: form-data; name=\"{name}\"; filename=\"{filename}\"\r\nContent-Type: {content_type}\r\n\r\n"
+                        )
+                        .as_bytes(),
+                    );
+                    body.extend_from_slice(data);
+                }
+            }
+            body.extend_from_slice(b"\r\n");
+        }
+        body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+        self.headers.push((
+            "content-type".into(),
+            format!("multipart/form-data; boundary={boundary}"),
+        ));
+        self.body = Bytes::from(body);
         self
     }
 
