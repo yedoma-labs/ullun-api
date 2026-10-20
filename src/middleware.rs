@@ -103,6 +103,10 @@ pub async fn logger(req: Request, next: Next) -> Result<Response> {
 }
 
 /// CORS middleware with preflight support
+///
+/// Kept for compatibility; delegates to [`crate::cors::Cors`], which also fixes
+/// the old behaviour of answering every origin with the first configured one.
+#[deprecated(since = "0.4.4", note = "use ullun::cors::Cors")]
 pub fn cors(
     allowed_origins: Vec<String>,
 ) -> impl Fn(
@@ -110,49 +114,16 @@ pub fn cors(
     Next,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response>> + Send>>
        + Clone {
+    let cors = if allowed_origins.iter().any(|o| o == "*") {
+        crate::cors::Cors::new().allow_any_origin()
+    } else {
+        crate::cors::Cors::new()
+            .allow_origins(allowed_origins)
+            .allow_credentials()
+    };
+    let cors = Arc::new(cors);
     move |req: Request, next: Next| {
-        let origins = allowed_origins.clone();
-        Box::pin(async move {
-            // Handle preflight OPTIONS requests
-            if req.method == http::Method::OPTIONS {
-                let mut response = Response::new(http::StatusCode::NO_CONTENT);
-
-                if !origins.is_empty() {
-                    let origin = if origins.contains(&"*".to_string()) {
-                        "*".to_string()
-                    } else {
-                        // In production, should check Origin header against allowed list
-                        origins[0].clone()
-                    };
-                    response = response.with_header("Access-Control-Allow-Origin", origin);
-                    response = response.with_header(
-                        "Access-Control-Allow-Methods",
-                        "GET, POST, PUT, DELETE, PATCH, OPTIONS",
-                    );
-                    response = response.with_header(
-                        "Access-Control-Allow-Headers",
-                        "Content-Type, Authorization",
-                    );
-                    response = response.with_header("Access-Control-Max-Age", "86400");
-                }
-
-                return Ok(response);
-            }
-
-            // Regular request - add CORS headers to response
-            let mut response = next.run(req).await?;
-
-            if !origins.is_empty() {
-                let origin = if origins.contains(&"*".to_string()) {
-                    "*".to_string()
-                } else {
-                    origins[0].clone()
-                };
-                response = response.with_header("Access-Control-Allow-Origin", origin);
-                response = response.with_header("Access-Control-Allow-Credentials", "true");
-            }
-
-            Ok(response)
-        })
+        let cors = cors.clone();
+        Box::pin(async move { cors.handle(req, next).await })
     }
 }

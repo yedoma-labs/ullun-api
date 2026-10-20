@@ -172,13 +172,16 @@ async fn handler(req: Request) -> Result<Response> {
 ### 5. CORS
 
 ```rust
-use ullun::middleware::cors;
+use ullun::cors::Cors;
+use ullun::security_headers::{Csp, SecurityHeaders};
 
 App::new()
-    .middleware(cors(vec![
-        "https://yourdomain.com".to_string(),
-        "https://api.yourdomain.com".to_string(),
-    ]))
+    .middleware(
+        Cors::new()
+            .allow_origins(["https://yourdomain.com", "https://app.yourdomain.com"])
+            .allow_credentials(),
+    )
+    .middleware(SecurityHeaders::new().csp(Csp::api()))
     // ... routes ...
 ```
 

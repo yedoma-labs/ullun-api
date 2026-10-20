@@ -60,6 +60,7 @@ tests/
 ├── example_gateway.rs    #   (real upstream servers, failover, streaming relay)
 ├── observability_test.rs # Request ids, access log, metrics
 ├── example_blog.rs       #   (browser-like: cookie jar, CSRF tokens scraped from HTML)
+├── cors_test.rs          # CORS (origins, preflight, Vary, credentials) and security headers / CSP nonce
 ├── limits_test.rs        # Timeouts, load shedding, connection caps, slowloris
 ├── session_test.rs       # Sessions (timeouts, fixation, isolation) and CSRF
 ├── example_drive.rs      #   (multipart uploads, real files on disk)

@@ -200,6 +200,15 @@ impl Request {
         self.secure
     }
 
+    /// Nonce for inline scripts and styles, when the
+    /// [`SecurityHeaders`](crate::security_headers::SecurityHeaders) policy uses the
+    /// `{nonce}` placeholder
+    pub fn csp_nonce(&self) -> Option<&str> {
+        self.extensions
+            .get::<crate::security_headers::CspNonce>()
+            .map(|n| n.0.as_str())
+    }
+
     /// DER of the leaf certificate the client presented during the TLS
     /// handshake (mutual TLS, feature `tls`); `None` for anonymous clients and
     /// plain HTTP. The certificate has already been verified against the CAs

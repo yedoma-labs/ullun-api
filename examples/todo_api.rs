@@ -291,7 +291,7 @@ async fn main() {
         // Global middleware
         .middleware(ullun::middleware::logger)
         .middleware(security_headers_middleware)
-        .middleware(ullun::middleware::cors(vec!["*".to_string()]))
+        .middleware(ullun::cors::Cors::new().allow_any_origin())
         // Public routes
         .get("/api/health", health_check)
         .post("/api/login", login)

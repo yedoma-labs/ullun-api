@@ -58,14 +58,21 @@ async fn tag(req: Request, next: Next) -> Result<Response> {
 async fn cors_preflight_is_answered_without_a_matching_route() {
     let addr = spawn(
         App::new()
-            .middleware(ullun::middleware::cors(vec![
-                "https://app.example.com".into()
-            ]))
+            .middleware(ullun::cors::Cors::new().allow_origin("https://app.example.com"))
             .get("/data", |_req: Request| async { Ok(Response::text("x")) }),
     )
     .await;
 
-    let (status, headers, _) = send(addr, "OPTIONS", "/data").await;
+    let (status, headers, _) = send_with(
+        addr,
+        "OPTIONS",
+        "/data",
+        &[
+            ("origin", "https://app.example.com"),
+            ("access-control-request-method", "GET"),
+        ],
+    )
+    .await;
     assert_eq!(status, 204);
     assert_eq!(
         headers["access-control-allow-origin"],
