@@ -52,6 +52,8 @@ tests/
 ├── state_test.rs         # Shared application state
 ├── example_shortener.rs  # Real-world example apps, run over real HTTP
 ├── example_pastebin.rs   #   (the app modules are included with #[path])
+├── example_taskboard.rs  #   (feature jwt)
+├── conditional_test.rs   # ETag middleware and If-Match preconditions
 ├── openapi_test.rs       # Generated OpenAPI document and Swagger page
 ├── websocket_test.rs     # Handshake, echo, origin check, size limit (feature websocket)
 └── pentest.rs            # Security regression tests

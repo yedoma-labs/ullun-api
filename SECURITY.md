@@ -46,6 +46,8 @@
 - `jwt` feature: HS256 tokens and `JwtAuth` middleware (rejects `alg: none`, constant-time signature check, 32-byte minimum secret). Authorization (roles, ownership) stays in your handlers
 - Hash passwords with a dedicated crate (argon2, bcrypt); never store them in plaintext
 
+**Secrets and comparisons** - `ullun::security` provides CSPRNG tokens (`random_token`) and `constant_time_eq`; use them for session ids, API keys and delete tokens. Hash passwords with argon2 (see `examples/taskboard`).
+
 **Rate Limiting** - `RateLimiter` middleware (per instance, in memory)
 - Keyed by peer IP by default; `trust_forwarded_for()` only behind your own reverse proxy
 - Use the reverse proxy (nginx, Caddy) or a shared store for limits across instances
