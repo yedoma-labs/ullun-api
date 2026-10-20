@@ -297,3 +297,105 @@ mod jwt_middleware {
         );
     }
 }
+
+#[cfg(feature = "compression")]
+mod compression_middleware {
+    use super::*;
+    use std::io::Read;
+    use ullun::compression::Compression;
+
+    fn app() -> App {
+        let big = "ullun ".repeat(1000);
+        let big2 = big.clone();
+        App::new()
+            .middleware(Compression::new())
+            .get("/big", move |_req: Request| {
+                let big = big.clone();
+                async move { Ok(Response::text(big)) }
+            })
+            .get("/json", move |_req: Request| {
+                let big = big2.clone();
+                async move { Ok(Response::json(serde_json::json!({ "t": big }))) }
+            })
+            .get("/small", |_req: Request| async {
+                Ok(Response::text("tiny"))
+            })
+            .get("/png", |_req: Request| async {
+                Ok(Response::ok()
+                    .with_header("content-type", "image/png")
+                    .with_body("p".repeat(4000)))
+            })
+            .get("/missing-type", |_req: Request| async {
+                Ok(Response::ok().with_body("x".repeat(4000)))
+            })
+    }
+
+    async fn raw(
+        addr: std::net::SocketAddr,
+        path: &str,
+        accept: Option<&str>,
+    ) -> (u16, hyper::HeaderMap, Vec<u8>) {
+        let stream = TcpStream::connect(addr).await.unwrap();
+        let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(stream))
+            .await
+            .unwrap();
+        tokio::spawn(conn);
+        let mut b = hyper::Request::builder()
+            .uri(path)
+            .header("host", "localhost");
+        if let Some(a) = accept {
+            b = b.header("accept-encoding", a);
+        }
+        let res = sender
+            .send_request(b.body(Full::<Bytes>::default()).unwrap())
+            .await
+            .unwrap();
+        let (status, headers) = (res.status().as_u16(), res.headers().clone());
+        (
+            status,
+            headers,
+            res.into_body().collect().await.unwrap().to_bytes().to_vec(),
+        )
+    }
+
+    #[tokio::test]
+    async fn gzips_large_text_and_json_responses() {
+        let addr = spawn(app()).await;
+        for (path, marker) in [("/big", "ullun ullun"), ("/json", "ullun ullun")] {
+            let (status, headers, body) = raw(addr, path, Some("gzip")).await;
+            assert_eq!(status, 200);
+            assert_eq!(headers["content-encoding"], "gzip");
+            assert_eq!(headers["vary"], "Accept-Encoding");
+            assert!(body.len() < 1000, "{path}: {} bytes", body.len());
+            let mut text = String::new();
+            flate2::read::GzDecoder::new(&body[..])
+                .read_to_string(&mut text)
+                .unwrap();
+            assert!(text.contains(marker), "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn leaves_other_responses_untouched() {
+        let addr = spawn(app()).await;
+
+        let (_, h, body) = raw(addr, "/big", None).await;
+        assert!(!h.contains_key("content-encoding") && body.len() == 6000);
+        assert_eq!(h["vary"], "Accept-Encoding");
+
+        let (_, h, _) = raw(addr, "/big", Some("gzip;q=0")).await;
+        assert!(!h.contains_key("content-encoding"));
+
+        let (_, h, body) = raw(addr, "/small", Some("gzip")).await;
+        assert!(!h.contains_key("content-encoding") && body == b"tiny");
+
+        for path in ["/png", "/missing-type"] {
+            let (_, h, body) = raw(addr, path, Some("gzip")).await;
+            assert!(
+                !h.contains_key("content-encoding") && body.len() == 4000,
+                "{path}"
+            );
+            assert!(!h.contains_key("vary"), "{path}");
+        }
+    }
+}
