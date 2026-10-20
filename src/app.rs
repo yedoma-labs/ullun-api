@@ -165,11 +165,19 @@ impl App {
     pub fn serve_static(mut self, route_prefix: &str, dir_path: &str) -> Self {
         use crate::static_files::StaticFileHandler;
         let handler = StaticFileHandler::new(dir_path);
-        // Use catch-all parameter syntax: {*param} matches rest of path
+        // matchit 0.9 catch-all syntax: {*param} matches the rest of the path
         let prefix = route_prefix.trim_end_matches('/');
-        let route = format!("{}/*filepath", prefix);
-        if let Err(e) = self.router.insert("GET", &route, Arc::new(handler) as DynHandler) {
+        let handler: DynHandler = Arc::new(handler);
+        let route = format!("{}/{{*filepath}}", prefix);
+        if let Err(e) = self.router.insert("GET", &route, handler.clone()) {
             panic!("Failed to register static file route {}: {}", route, e);
+        }
+        // The catch-all needs at least one segment, so also serve the prefix
+        // root (-> index.html). Skipped when the user already owns that route.
+        let root = if prefix.is_empty() { "/" } else { prefix };
+        let _ = self.router.insert("GET", root, handler.clone());
+        if !prefix.is_empty() {
+            let _ = self.router.insert("GET", &format!("{}/", prefix), handler);
         }
         self
     }
