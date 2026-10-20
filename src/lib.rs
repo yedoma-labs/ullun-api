@@ -30,6 +30,7 @@ pub mod handler;
 #[cfg(feature = "jwt")]
 pub mod jwt;
 pub mod middleware;
+pub mod openapi;
 pub mod rate_limit;
 pub mod request;
 pub mod response;
