@@ -31,7 +31,9 @@ cargo tarpaulin --out Html --output-dir coverage
 ## Benchmarks
 
 ```bash
-cargo bench
+cargo bench                              # everything
+cargo bench --bench router_benchmark     # micro-benchmarks
+cargo bench --bench http_benchmark       # end-to-end over TCP
 ```
 
 View results in `target/criterion/report/index.html`
@@ -41,10 +43,14 @@ View results in `target/criterion/report/index.html`
 ```
 tests/
 ├── integration_test.rs   # Unit-level integration tests
-└── e2e_test.rs          # End-to-end HTTP tests (requires ports)
+├── e2e_test.rs           # End-to-end HTTP tests (fixed ports)
+├── middleware_test.rs    # Middleware order, CORS preflight, 404 wrapping (ephemeral port)
+├── static_files_test.rs  # Static serving, index files, traversal (ephemeral port)
+└── pentest.rs            # Security regression tests
 
 benches/
-└── router_benchmark.rs  # Performance benchmarks
+├── router_benchmark.rs   # Micro-benchmarks: routing, request/response, middleware chain
+└── http_benchmark.rs     # End-to-end HTTP round trips over loopback
 ```
 
 ## Writing Tests
@@ -79,6 +85,19 @@ fn test_error_mapping() {
 }
 ```
 
+### Testing against a real server
+
+Bind to port `0` and use `App::serve` so tests never collide on ports:
+
+```rust
+let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+let addr = listener.local_addr().unwrap();
+tokio::spawn(app.serve(listener));
+// connect a hyper client to `addr`
+```
+
+See `tests/middleware_test.rs` for a complete helper.
+
 ### Testing Middleware
 
 ```rust
@@ -99,10 +118,9 @@ async fn test_middleware() {
 ## CI/CD Testing
 
 Tests run automatically on:
-- Pull requests
-- Pushes to main/develop
-- Multiple OS (Linux, macOS, Windows)
-- Multiple Rust versions (stable, beta)
+- Pull requests to `main`
+- Pushes to `main` (a release only follows when lint, tests and build all passed)
+- Linux, macOS and Windows on stable Rust
 
 See `.github/workflows/ci.yml`
 
@@ -122,12 +140,7 @@ cargo run --example hello_world --release
 wrk -t12 -c400 -d30s http://localhost:3000/
 ```
 
-### Expected Performance
-
-- **Throughput:** 50,000+ requests/second (hello world)
-- **Latency (p50):** <1ms
-- **Latency (p99):** <5ms
-- **Memory:** ~2-5MB per connection
+Measured numbers and how to reproduce them: [PERFORMANCE.md](PERFORMANCE.md).
 
 ### Benchmarking Tips
 
@@ -145,6 +158,4 @@ wrk -t12 -c400 -d30s http://localhost:3000/
 
 ## Continuous Benchmarking
 
-Benchmarks run on every push to main and results are tracked over time.
-
-View trends: https://github.com/yedoma-labs/ullun-api/benchmarks
+`cargo bench --no-run` runs in CI to keep the benchmarks compiling. Full runs are noisy on shared runners; run them locally and compare with `cargo bench -- --save-baseline before` / `--baseline before`.
