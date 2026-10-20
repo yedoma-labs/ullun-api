@@ -320,8 +320,9 @@ const MONTHS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
-/// HTTP date (IMF-fixdate), e.g. `Sun, 06 Nov 1994 08:49:37 GMT`
-pub fn http_date(unix_secs: u64) -> String {
+/// Calendar fields of a Unix timestamp: (year, month 1-12, day, hour, minute,
+/// second, weekday index with 0 = Thursday)
+fn civil(unix_secs: u64) -> (i64, i64, i64, u64, u64, u64, usize) {
     let days = (unix_secs / 86_400) as i64;
     let rem = unix_secs % 86_400;
     // civil-from-days (Howard Hinnant)
@@ -334,15 +335,38 @@ pub fn http_date(unix_secs: u64) -> String {
     let day = doy - (153 * mp + 2) / 5 + 1;
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = yoe + era * 400 + i64::from(month <= 2);
+    (
+        year,
+        month,
+        day,
+        rem / 3600,
+        (rem % 3600) / 60,
+        rem % 60,
+        days.rem_euclid(7) as usize,
+    )
+}
+
+/// HTTP date (IMF-fixdate), e.g. `Sun, 06 Nov 1994 08:49:37 GMT`
+pub fn http_date(unix_secs: u64) -> String {
+    let (year, month, day, h, m, s, weekday) = civil(unix_secs);
     format!(
         "{}, {:02} {} {:04} {:02}:{:02}:{:02} GMT",
-        DAYS[(days.rem_euclid(7)) as usize],
+        DAYS[weekday],
         day,
         MONTHS[(month - 1) as usize],
         year,
-        rem / 3600,
-        (rem % 3600) / 60,
-        rem % 60
+        h,
+        m,
+        s
+    )
+}
+
+/// ISO 8601 / RFC 3339 UTC timestamp, e.g. `1994-11-06T08:49:37Z`
+pub fn iso8601(unix_secs: u64) -> String {
+    let (year, month, day, h, m, s, _) = civil(unix_secs);
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        year, month, day, h, m, s
     )
 }
 
@@ -418,6 +442,14 @@ mod tests {
         ] {
             assert_eq!(parse_http_date(&http_date(secs)), Some(secs), "{secs}");
         }
+    }
+
+    #[test]
+    fn iso_timestamps() {
+        assert_eq!(iso8601(784_111_777), "1994-11-06T08:49:37Z");
+        assert_eq!(iso8601(0), "1970-01-01T00:00:00Z");
+        assert_eq!(iso8601(951_782_400), "2000-02-29T00:00:00Z");
+        assert_eq!(iso8601(253_402_300_799), "9999-12-31T23:59:59Z");
     }
 
     #[test]

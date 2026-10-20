@@ -719,9 +719,10 @@ async fn handle_request(
 
     // Match route. A miss still runs the middleware chain (CORS preflight,
     // request ids, logging, security headers) and ends in 404 / 405 / OPTIONS.
-    let route = match router.match_route(&method, &path) {
-        Ok((handler, params)) => {
+    let route = match router.match_route_with_pattern(&method, &path) {
+        Ok((handler, params, pattern)) => {
             request.params = params;
+            request.matched_path = Some(pattern);
             Route::Found(handler)
         }
         Err(_) => Route::Miss {

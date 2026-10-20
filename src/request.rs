@@ -144,6 +144,10 @@ pub struct Request {
     pub extensions: http::Extensions,
     /// Address of the connected peer (the proxy when behind one)
     pub remote_addr: Option<std::net::SocketAddr>,
+    /// The route pattern that matched, e.g. `/users/{id}`; `None` when no route
+    /// matched. Use it, not the raw path, as a metrics label or log field: it
+    /// stays the same for every id.
+    pub matched_path: Option<std::sync::Arc<str>>,
     pub(crate) state: Option<std::sync::Arc<StateMap>>,
     pub(crate) shutdown: Option<crate::shutdown::Shutdown>,
     cookies: OnceLock<Cookies>,
@@ -170,6 +174,7 @@ impl Request {
             query,
             extensions: http::Extensions::new(),
             remote_addr: None,
+            matched_path: None,
             state: None,
             shutdown: None,
             cookies: OnceLock::new(),
