@@ -60,7 +60,9 @@ impl Shutdown {
     }
 }
 
-/// Handed to every task registered with `App::background`
+/// Handed to every task registered with `App::background`; cheap to clone into
+/// sub-tasks
+#[derive(Clone)]
 pub struct Context {
     pub(crate) state: std::sync::Arc<crate::request::StateMap>,
     shutdown: Shutdown,
