@@ -57,3 +57,39 @@ async fn missing_state_is_a_500_not_a_panic() {
     assert_eq!(res.status, 500);
     assert!(res.text().contains("not registered"));
 }
+
+#[tokio::test]
+async fn state_arc_outlives_the_request() {
+    let server = spawn(
+        App::new()
+            .state(Hits::default())
+            .middleware(|req: Request, next: Next| async move {
+                // `req` is moved into next.run, so a borrowed &Hits would not do
+                let hits = req.state_arc::<Hits>()?;
+                let res = next.run(req).await?;
+                Ok(res.with_header("x-hits-after", hits.0.load(Ordering::Relaxed).to_string()))
+            })
+            .get("/", |req: Request| async move {
+                let hits = req.state_arc::<Hits>()?;
+                tokio::spawn(async move {
+                    hits.0.fetch_add(1, Ordering::Relaxed);
+                });
+                Ok(Response::text("ok"))
+            }),
+    )
+    .await;
+    assert_eq!(server.get("/").send().await.status, 200);
+    assert!(server
+        .get("/")
+        .send()
+        .await
+        .header("x-hits-after")
+        .parse::<u32>()
+        .is_ok());
+    let missing = spawn(App::new().get("/", |req: Request| async move {
+        req.state_arc::<Greeting>()?;
+        Ok(Response::text("unreachable"))
+    }))
+    .await;
+    assert_eq!(missing.get("/").send().await.status, 500);
+}
