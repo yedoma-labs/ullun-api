@@ -4,7 +4,7 @@ use crate::error::{Error, Result};
 use crate::handler::{DynHandler, Handler, HandlerWithParams};
 use crate::middleware::{Layered, Middleware, Next};
 use crate::openapi::{self, OpenApiInfo, Operation, RouteKind};
-use crate::request::{Params, Request};
+use crate::request::{Params, Request, StateMap};
 use crate::response::Response;
 use crate::router::Router;
 use http_body_util::BodyExt;
@@ -24,6 +24,15 @@ pub struct App {
     max_body_size: Option<usize>, // in bytes
     docs: HashMap<(String, String), Operation>,
     openapi: Option<OpenApiInfo>,
+    state: StateMap,
+}
+
+/// Everything a running server shares between connections
+struct Shared {
+    router: Router,
+    middlewares: Vec<Arc<dyn Middleware>>,
+    max_body_size: Option<usize>,
+    state: Arc<StateMap>,
 }
 
 /// Route group builder
@@ -42,12 +51,39 @@ impl App {
             max_body_size: Some(10 * 1024 * 1024), // 10 MB default
             docs: HashMap::new(),
             openapi: None,
+            state: StateMap::default(),
         }
     }
 
     /// Set maximum request body size in bytes (None = unlimited)
     pub fn max_body_size(mut self, size: Option<usize>) -> Self {
         self.max_body_size = size;
+        self
+    }
+
+    /// Register shared application state, readable in handlers and
+    /// middleware with [`Request::state`]
+    ///
+    /// One value per type; registering the same type again replaces it. Use
+    /// interior mutability (`Mutex`, `RwLock`, atomics) for mutable state: the
+    /// value is shared by all requests and is not cloned.
+    ///
+    /// ```
+    /// use ullun::prelude::*;
+    /// use std::sync::atomic::{AtomicU64, Ordering};
+    ///
+    /// #[derive(Default)]
+    /// struct Hits(AtomicU64);
+    ///
+    /// async fn count(req: Request) -> Result<Response> {
+    ///     let hits = req.state::<Hits>()?.0.fetch_add(1, Ordering::Relaxed) + 1;
+    ///     Ok(Response::text(hits.to_string()))
+    /// }
+    ///
+    /// let app = App::new().state(Hits::default()).get("/", count);
+    /// ```
+    pub fn state<T: Send + Sync + 'static>(mut self, value: T) -> Self {
+        self.state.insert(value);
         self
     }
 
@@ -269,9 +305,7 @@ impl App {
 
         println!("🚀 ullun-api listening on http://{}", addr);
 
-        let router = Arc::new(this.router);
-        let middlewares = Arc::new(this.middlewares);
-        let max_body_size = this.max_body_size;
+        let shared = Arc::new(this.into_shared());
 
         // Graceful shutdown signal
         let shutdown = async {
@@ -286,7 +320,7 @@ impl App {
                 println!("✅ Server stopped");
                 Ok(())
             }
-            result = Self::serve_loop(listener, router, middlewares, max_body_size) => result
+            result = Self::serve_loop(listener, shared) => result
         }
     }
 
@@ -297,13 +331,16 @@ impl App {
     /// Unlike [`App::run`], this does not install a CTRL+C handler.
     pub async fn serve(self, listener: TcpListener) -> Result<()> {
         let this = self.finalize();
-        Self::serve_loop(
-            listener,
-            Arc::new(this.router),
-            Arc::new(this.middlewares),
-            this.max_body_size,
-        )
-        .await
+        Self::serve_loop(listener, Arc::new(this.into_shared())).await
+    }
+
+    fn into_shared(self) -> Shared {
+        Shared {
+            router: self.router,
+            middlewares: self.middlewares,
+            max_body_size: self.max_body_size,
+            state: Arc::new(self.state),
+        }
     }
 
     /// Last step before serving: publish the OpenAPI document, now that all
@@ -348,12 +385,7 @@ impl App {
         }
     }
 
-    async fn serve_loop(
-        listener: TcpListener,
-        router: Arc<Router>,
-        middlewares: Arc<Vec<Arc<dyn Middleware>>>,
-        max_body_size: Option<usize>,
-    ) -> Result<()> {
+    async fn serve_loop(listener: TcpListener, shared: Arc<Shared>) -> Result<()> {
         loop {
             let (stream, peer) = listener
                 .accept()
@@ -361,26 +393,22 @@ impl App {
                 .map_err(|e| Error::internal(format!("Failed to accept: {}", e)))?;
 
             let io = TokioIo::new(stream);
-            let router = router.clone();
-            let middlewares = middlewares.clone();
+            let shared = shared.clone();
 
             tokio::task::spawn(async move {
-                if let Err(err) = http1::Builder::new()
-                    .serve_connection(
-                        io,
-                        service_fn(|req| {
-                            let router = router.clone();
-                            let middlewares = middlewares.clone();
-                            async move {
-                                Ok::<_, Infallible>(
-                                    handle_request(req, peer, router, middlewares, max_body_size)
-                                        .await,
-                                )
-                            }
-                        }),
-                    )
-                    .with_upgrades()
-                    .await
+                if let Err(err) =
+                    http1::Builder::new()
+                        .serve_connection(
+                            io,
+                            service_fn(|req| {
+                                let shared = shared.clone();
+                                async move {
+                                    Ok::<_, Infallible>(handle_request(req, peer, shared).await)
+                                }
+                            }),
+                        )
+                        .with_upgrades()
+                        .await
                 {
                     eprintln!("Error serving connection: {:?}", err);
                 }
@@ -490,10 +518,15 @@ impl RouteGroup {
 async fn handle_request(
     req: hyper::Request<hyper::body::Incoming>,
     peer: SocketAddr,
-    router: Arc<Router>,
-    middlewares: Arc<Vec<Arc<dyn Middleware>>>,
-    max_body_size: Option<usize>,
+    shared: Arc<Shared>,
 ) -> hyper::Response<http_body_util::Full<bytes::Bytes>> {
+    let Shared {
+        router,
+        middlewares,
+        max_body_size,
+        state,
+    } = &*shared;
+    let max_body_size = *max_body_size;
     let method = req.method().to_string();
     let path = req.uri().path().to_string();
 
@@ -540,6 +573,7 @@ async fn handle_request(
     let mut request = Request::new(parts.method, parts.uri, parts.headers, body_bytes);
     request.extensions = parts.extensions;
     request.remote_addr = Some(peer);
+    request.state = Some(state.clone());
 
     // Match route. A miss still runs the middleware chain (CORS preflight,
     // request ids, logging, security headers) and ends in a 404.

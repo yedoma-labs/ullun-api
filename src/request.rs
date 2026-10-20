@@ -103,6 +103,25 @@ impl Default for Query {
     }
 }
 
+/// Type-keyed storage for shared application state
+#[derive(Default)]
+pub(crate) struct StateMap {
+    values: HashMap<std::any::TypeId, Box<dyn std::any::Any + Send + Sync>>,
+}
+
+impl StateMap {
+    pub(crate) fn insert<T: Send + Sync + 'static>(&mut self, value: T) {
+        self.values
+            .insert(std::any::TypeId::of::<T>(), Box::new(value));
+    }
+
+    pub(crate) fn get<T: Send + Sync + 'static>(&self) -> Option<&T> {
+        self.values
+            .get(&std::any::TypeId::of::<T>())
+            .and_then(|v| v.downcast_ref::<T>())
+    }
+}
+
 /// HTTP Request wrapper
 pub struct Request {
     pub method: http::Method,
@@ -116,6 +135,7 @@ pub struct Request {
     pub extensions: http::Extensions,
     /// Address of the connected peer (the proxy when behind one)
     pub remote_addr: Option<std::net::SocketAddr>,
+    pub(crate) state: Option<std::sync::Arc<StateMap>>,
     cookies: OnceCell<Cookies>,
 }
 
@@ -140,8 +160,27 @@ impl Request {
             query,
             extensions: http::Extensions::new(),
             remote_addr: None,
+            state: None,
             cookies: OnceCell::new(),
         }
+    }
+
+    /// Shared application state registered with `App::state`
+    ///
+    /// Answers `500` when no value of type `T` was registered: that is a
+    /// programming error, not something the client can fix.
+    pub fn state<T: Send + Sync + 'static>(&self) -> Result<&T> {
+        self.try_state().ok_or_else(|| {
+            Error::internal(format!(
+                "State of type {} is not registered",
+                std::any::type_name::<T>()
+            ))
+        })
+    }
+
+    /// Like [`Request::state`], `None` when the type is not registered
+    pub fn try_state<T: Send + Sync + 'static>(&self) -> Option<&T> {
+        self.state.as_ref()?.get::<T>()
     }
 
     /// Get cookies from the request
