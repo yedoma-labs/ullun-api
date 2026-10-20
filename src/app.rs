@@ -29,6 +29,7 @@ pub struct App {
     state: StateMap,
     background: Vec<BackgroundTask>,
     shutdown_grace: Duration,
+    body_limits: Vec<(String, Option<usize>)>,
 }
 
 type BackgroundTask = Box<dyn FnOnce(Context) -> BoxFuture<'static, ()> + Send>;
@@ -38,6 +39,7 @@ struct Shared {
     router: Router,
     middlewares: Vec<Arc<dyn Middleware>>,
     max_body_size: Option<usize>,
+    body_limits: Vec<(String, Option<usize>)>,
     state: Arc<StateMap>,
     shutdown: Shutdown,
 }
@@ -48,6 +50,7 @@ pub struct RouteGroup {
     routes: Vec<(String, String, DynHandler)>, // (method, path, handler)
     middlewares: Vec<Arc<dyn Middleware>>,
     docs: Vec<(String, String, Operation)>, // (method, path relative to prefix, docs)
+    body_limit: Option<Option<usize>>,
 }
 
 impl App {
@@ -61,12 +64,25 @@ impl App {
             state: StateMap::default(),
             background: Vec::new(),
             shutdown_grace: Duration::from_secs(10),
+            body_limits: Vec::new(),
         }
     }
 
     /// Set maximum request body size in bytes (None = unlimited)
     pub fn max_body_size(mut self, size: Option<usize>) -> Self {
         self.max_body_size = size;
+        self
+    }
+
+    /// Different request body limit for everything under `prefix`
+    ///
+    /// `None` removes the limit. The longest matching prefix wins over the
+    /// default from [`App::max_body_size`], e.g. a small default with a large
+    /// limit for an upload route:
+    /// `App::new().max_body_size(Some(64 * 1024)).body_limit("/api/files", Some(25 << 20))`.
+    pub fn body_limit(mut self, prefix: &str, limit: Option<usize>) -> Self {
+        self.body_limits
+            .push((prefix.trim_end_matches('/').to_string(), limit));
         self
     }
 
@@ -138,6 +154,9 @@ impl App {
         let group = RouteGroup::new(prefix);
         let group = configure(group);
 
+        if let Some(limit) = group.body_limit {
+            self.body_limits.push((group.prefix.clone(), limit));
+        }
         for (method, path, op) in group.docs {
             let full_path = format!("{}{}", group.prefix, path);
             self.docs.insert((method, full_path), op);
@@ -448,6 +467,7 @@ impl App {
             router: self.router,
             middlewares: self.middlewares,
             max_body_size: self.max_body_size,
+            body_limits: self.body_limits,
             state: Arc::new(self.state),
             shutdown,
         }
@@ -565,7 +585,15 @@ impl RouteGroup {
             routes: Vec::new(),
             middlewares: Vec::new(),
             docs: Vec::new(),
+            body_limit: None,
         }
+    }
+
+    /// Request body limit for this group's routes (`None` = unlimited),
+    /// overriding the application default
+    pub fn max_body_size(mut self, limit: Option<usize>) -> Self {
+        self.body_limit = Some(limit);
+        self
     }
 
     /// Describe a route of this group for the OpenAPI document; `path` is
@@ -658,13 +686,14 @@ async fn handle_request(
         router,
         middlewares,
         max_body_size,
+        body_limits,
         state,
         shutdown,
     } = &*shared;
-    let max_body_size = *max_body_size;
     let method = req.method().to_string();
     let is_head = req.method() == http::Method::HEAD;
     let path = req.uri().path().to_string();
+    let max_body_size = body_limit_for(body_limits, &path, *max_body_size);
 
     // Convert hyper request to our Request type
     let (parts, body) = req.into_parts();
@@ -752,6 +781,26 @@ async fn handle_request(
     };
 
     response.into_hyper()
+}
+
+/// Limit for `path`: the longest matching prefix rule, else the default
+fn body_limit_for(
+    rules: &[(String, Option<usize>)],
+    path: &str,
+    default: Option<usize>,
+) -> Option<usize> {
+    rules
+        .iter()
+        .filter(|(prefix, _)| {
+            prefix.is_empty()
+                || path == prefix
+                || path
+                    .strip_prefix(prefix.as_str())
+                    .is_some_and(|rest| rest.starts_with('/'))
+        })
+        .max_by_key(|(prefix, _)| prefix.len())
+        .map(|(_, limit)| *limit)
+        .unwrap_or(default)
 }
 
 /// Outcome of routing
