@@ -70,6 +70,8 @@ tokio-tungstenite = { version = "0.30", features = ["connect"] }
 futures-util = "0.3"
 # password hashing for the taskboard example
 argon2 = "0.6"
+# pooled HTTP client for the gateway example
+hyper-util = { version = "0.1.21", features = ["client-legacy", "http1", "tokio"] }
 # markdown for the blog example
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 criterion = { version = "0.8", features = ["async_tokio"] }
@@ -122,3 +124,7 @@ required-features = ["jwt"]
 [[example]]
 name = "blog"
 path = "examples/blog/main.rs"
+
+[[example]]
+name = "gateway"
+path = "examples/gateway/main.rs"
