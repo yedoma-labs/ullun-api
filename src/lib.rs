@@ -50,6 +50,7 @@ pub mod router;
 pub mod security;
 pub mod static_files;
 pub mod template;
+pub mod validate;
 #[cfg(feature = "websocket")]
 pub mod websocket;
 

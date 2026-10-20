@@ -427,3 +427,39 @@ async fn one_middleware_instance_can_serve_several_groups() {
     assert_eq!(send(addr, "GET", "/a/x").await.0, 429);
     assert_eq!(send(addr, "GET", "/b/x").await.0, 429);
 }
+
+#[tokio::test]
+async fn validation_errors_render_as_422_with_fields() {
+    use ullun::validate::Validator;
+
+    let addr = spawn(App::new().post("/tasks", |req: Request| async move {
+        let body: serde_json::Value = req.json()?;
+        let mut v = Validator::new();
+        v.len_between("title", body["title"].as_str().unwrap_or(""), 1, 5);
+        v.range("priority", body["priority"].as_i64().unwrap_or(-1), 0, 3);
+        v.error("title", "second problem on the same field");
+        v.finish()?;
+        Ok(Response::text("ok"))
+    }))
+    .await;
+
+    let stream = TcpStream::connect(addr).await.unwrap();
+    let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(stream))
+        .await
+        .unwrap();
+    tokio::spawn(conn);
+    let req = hyper::Request::builder()
+        .method("POST")
+        .uri("/tasks")
+        .header("host", "localhost")
+        .body(Full::<Bytes>::from(r#"{"title":"","priority":9}"#))
+        .unwrap();
+    let res = sender.send_request(req).await.unwrap();
+    assert_eq!(res.status(), 422);
+    let body: serde_json::Value =
+        serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(body["error"], "Validation failed");
+    assert_eq!(body["status"], 422);
+    assert_eq!(body["fields"]["title"].as_array().unwrap().len(), 2);
+    assert_eq!(body["fields"]["priority"][0], "must be between 0 and 3");
+}

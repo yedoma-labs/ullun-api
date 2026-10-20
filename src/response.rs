@@ -99,10 +99,24 @@ impl Response {
 
     pub fn from_error(error: Error) -> Self {
         let status = error.status();
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "error": error.message(),
             "status": error.status_code(),
         });
+        if let Error::Validation(fields) = &error {
+            // field -> list of messages, in the order they were found
+            let mut by_field = serde_json::Map::new();
+            for f in fields {
+                if let Some(list) = by_field
+                    .entry(f.field.clone())
+                    .or_insert_with(|| serde_json::Value::Array(Vec::new()))
+                    .as_array_mut()
+                {
+                    list.push(serde_json::Value::String(f.message.clone()));
+                }
+            }
+            body["fields"] = serde_json::Value::Object(by_field);
+        }
         let body_bytes =
             serde_json::to_vec(&body).unwrap_or_else(|_| b"{\"error\":\"Unknown error\"}".to_vec());
         Self::new(status)
