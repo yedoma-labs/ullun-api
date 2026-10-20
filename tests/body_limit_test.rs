@@ -103,3 +103,21 @@ async fn limits_are_enforced_per_route_on_the_declared_length() {
         413
     );
 }
+
+#[tokio::test]
+async fn oversized_uploads_get_a_readable_413_not_a_connection_reset() {
+    // the server drains what the client is still sending before answering,
+    // otherwise the OS resets the connection and the response is lost
+    let s = spawn(App::new().max_body_size(Some(1024)).post("/up", echo_len())).await;
+    for size in [2 * 1024, 300 * 1024, 3 * 1024 * 1024] {
+        let res = s.post("/up").body(vec![b'x'; size]).send().await;
+        assert_eq!(res.status, 413, "{size} bytes");
+        assert_eq!(res.header("connection"), "close");
+        assert!(res.text().contains("too large"));
+    }
+    // the server is fine afterwards
+    assert_eq!(
+        s.post("/up").body(vec![b'x'; 1024]).send().await.status,
+        200
+    );
+}
