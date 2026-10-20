@@ -1,0 +1,203 @@
+#![cfg(feature = "websocket")]
+//! WebSocket endpoints against a real client (tokio-tungstenite)
+
+use futures_util::{SinkExt, StreamExt};
+use tokio::net::TcpListener;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::{Error as WsError, Message as Wire};
+use ullun::prelude::*;
+use ullun::websocket::{Message, WebSocket, WsOptions};
+
+async fn spawn(app: App) -> std::net::SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(app.serve(listener));
+    addr
+}
+
+fn echo_app() -> App {
+    App::new()
+        .middleware(|mut req: Request, next: Next| async move {
+            req.extensions.insert(7u32);
+            next.run(req).await
+        })
+        .ws(
+            "/echo/{room}",
+            |req: Request, mut socket: WebSocket| async move {
+                let room = req.params.get_opt("room").unwrap_or("?").to_string();
+                let who = req.query.get("as").unwrap_or("anon").to_string();
+                let ext = req.extensions.get::<u32>().copied().unwrap_or(0);
+                let _ = socket
+                    .send_text(format!("hello {who} in {room} ({ext})"))
+                    .await;
+                while let Some(Ok(msg)) = socket.recv().await {
+                    match msg {
+                        Message::Text(t) => {
+                            let _ = socket.send_text(t.to_uppercase()).await;
+                        }
+                        Message::Binary(b) => {
+                            let _ = socket.send_binary(b).await;
+                        }
+                        Message::Close => break,
+                        _ => {}
+                    }
+                }
+            },
+        )
+}
+
+#[tokio::test]
+async fn echoes_text_and_binary_with_request_context() {
+    let addr = spawn(echo_app()).await;
+    let (mut ws, response) =
+        tokio_tungstenite::connect_async(format!("ws://{addr}/echo/lobby?as=ann"))
+            .await
+            .unwrap();
+    assert_eq!(response.status(), 101);
+
+    assert_eq!(
+        ws.next().await.unwrap().unwrap(),
+        Wire::text("hello ann in lobby (7)")
+    );
+    ws.send(Wire::text("ping me")).await.unwrap();
+    assert_eq!(ws.next().await.unwrap().unwrap(), Wire::text("PING ME"));
+    ws.send(Wire::binary(vec![1, 2, 3])).await.unwrap();
+    assert_eq!(
+        ws.next().await.unwrap().unwrap(),
+        Wire::binary(vec![1, 2, 3])
+    );
+
+    // protocol-level ping is answered by the library
+    ws.send(Wire::Ping(vec![9].into())).await.unwrap();
+    assert_eq!(
+        ws.next().await.unwrap().unwrap(),
+        Wire::Pong(vec![9].into())
+    );
+
+    ws.close(None).await.unwrap();
+    // the server finishes the closing handshake
+    while let Some(msg) = ws.next().await {
+        if matches!(msg, Ok(Wire::Close(_)) | Err(_)) {
+            break;
+        }
+    }
+}
+
+#[tokio::test]
+async fn plain_http_requests_and_bad_handshakes_are_rejected() {
+    let addr = spawn(echo_app()).await;
+
+    // plain GET without upgrade headers
+    let plain = raw_get(addr, "/echo/x", &[]).await;
+    assert!(plain.starts_with("HTTP/1.1 400"), "{plain}");
+
+    // wrong version
+    let old = raw_get(
+        addr,
+        "/echo/x",
+        &[
+            ("connection", "Upgrade"),
+            ("upgrade", "websocket"),
+            ("sec-websocket-version", "8"),
+            ("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ=="),
+        ],
+    )
+    .await;
+    assert!(old.starts_with("HTTP/1.1 426"), "{old}");
+    assert!(old.to_lowercase().contains("sec-websocket-version: 13"));
+}
+
+async fn raw_get(addr: std::net::SocketAddr, path: &str, headers: &[(&str, &str)]) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let mut req = format!("GET {path} HTTP/1.1\r\nhost: {addr}\r\nconnection: close\r\n");
+    for (k, v) in headers {
+        req.push_str(&format!("{k}: {v}\r\n"));
+    }
+    req.push_str("\r\n");
+    stream.write_all(req.as_bytes()).await.unwrap();
+    let mut out = String::new();
+    stream.read_to_string(&mut out).await.unwrap();
+    out
+}
+
+#[tokio::test]
+async fn cross_site_origin_is_rejected_unless_allowed() {
+    let app = App::new()
+        .ws("/strict", |_req: Request, mut s: WebSocket| async move {
+            let _ = s.send_text("ok").await;
+        })
+        .ws_with(
+            "/open",
+            WsOptions {
+                allowed_origins: vec!["https://app.example.com".into()],
+                ..Default::default()
+            },
+            |_req: Request, mut s: WebSocket| async move {
+                let _ = s.send_text("ok").await;
+            },
+        );
+    let addr = spawn(app).await;
+
+    let connect = |path: &str, origin: Option<String>| {
+        let mut req = format!("ws://{addr}{path}").into_client_request().unwrap();
+        if let Some(o) = origin {
+            req.headers_mut().insert("origin", o.parse().unwrap());
+        }
+        tokio_tungstenite::connect_async(req)
+    };
+
+    // no Origin (native client) and same-origin pass
+    assert!(connect("/strict", None).await.is_ok());
+    assert!(connect("/strict", Some(format!("http://{addr}")))
+        .await
+        .is_ok());
+
+    // cross-site is a 403 on the strict endpoint
+    match connect("/strict", Some("https://evil.example".into())).await {
+        Err(WsError::Http(res)) => assert_eq!(res.status(), 403),
+        other => panic!("expected 403, got {:?}", other.map(|(_, r)| r.status())),
+    }
+    // allow-listed origin passes on the other
+    assert!(connect("/open", Some("https://app.example.com".into()))
+        .await
+        .is_ok());
+    assert!(connect("/open", Some("https://evil.example".into()))
+        .await
+        .is_err());
+}
+
+#[tokio::test]
+async fn oversized_messages_close_the_connection() {
+    let app = App::new().ws_with(
+        "/small",
+        WsOptions {
+            max_message_size: 64,
+            ..Default::default()
+        },
+        |_req: Request, mut s: WebSocket| async move {
+            while let Some(Ok(msg)) = s.recv().await {
+                if let Message::Text(t) = msg {
+                    let _ = s.send_text(format!("got {}", t.len())).await;
+                }
+            }
+        },
+    );
+    let addr = spawn(app).await;
+    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/small"))
+        .await
+        .unwrap();
+
+    ws.send(Wire::text("x".repeat(10))).await.unwrap();
+    assert_eq!(ws.next().await.unwrap().unwrap(), Wire::text("got 10"));
+
+    ws.send(Wire::text("x".repeat(1000))).await.unwrap();
+    // no echo: the server drops the connection (close frame or reset)
+    loop {
+        match ws.next().await {
+            Some(Ok(Wire::Text(t))) => panic!("oversized message was processed: {t}"),
+            Some(Ok(_)) => continue,
+            Some(Err(_)) | None => break,
+        }
+    }
+}
