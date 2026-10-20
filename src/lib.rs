@@ -30,6 +30,7 @@ pub mod request;
 pub mod response;
 pub mod router;
 pub mod static_files;
+pub mod template;
 
 pub mod prelude {
     pub use crate::app::{App, RouteGroup};
@@ -40,6 +41,7 @@ pub mod prelude {
     pub use crate::request::{Params, Query, Request};
     pub use crate::response::{Json, Response};
     pub use crate::router::Router;
+    pub use crate::template::{TemplateEngine, Templates};
     pub use async_trait::async_trait;
     pub use serde::{Deserialize, Serialize};
 }
