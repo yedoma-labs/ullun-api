@@ -92,7 +92,7 @@ pub struct ETags;
 #[async_trait]
 impl Middleware for ETags {
     async fn handle(&self, req: Request, next: Next) -> Result<Response> {
-        let is_get = req.method == http::Method::GET;
+        let is_get = req.method == http::Method::GET || req.method == http::Method::HEAD;
         let if_none_match = req
             .headers
             .get(http::header::IF_NONE_MATCH)

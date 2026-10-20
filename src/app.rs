@@ -663,6 +663,7 @@ async fn handle_request(
     } = &*shared;
     let max_body_size = *max_body_size;
     let method = req.method().to_string();
+    let is_head = req.method() == http::Method::HEAD;
     let path = req.uri().path().to_string();
 
     // Convert hyper request to our Request type
@@ -712,23 +713,25 @@ async fn handle_request(
     request.shutdown = Some(shutdown.clone());
 
     // Match route. A miss still runs the middleware chain (CORS preflight,
-    // request ids, logging, security headers) and ends in a 404.
-    let handler: Option<DynHandler> = match router.match_route(&method, &path) {
+    // request ids, logging, security headers) and ends in 404 / 405 / OPTIONS.
+    let route = match router.match_route(&method, &path) {
         Ok((handler, params)) => {
             request.params = params;
-            Some(handler)
+            Route::Found(handler)
         }
-        Err(_) => None,
+        Err(_) => Route::Miss {
+            allow: router.allowed_methods(&path),
+        },
     };
 
     let result = if middlewares.is_empty() {
-        dispatch(handler, request).await
+        dispatch(route, request).await
     } else {
-        // Route handler (or the 404) runs as the last link of the chain
+        // Route handler (or the miss) runs as the last link of the chain
         let mut chain = middlewares.to_vec();
         let final_handler = Arc::new(move |req: Request, _next: Next| {
-            let handler = handler.clone();
-            async move { dispatch(handler, req).await }
+            let route = route.clone();
+            async move { dispatch(route, req).await }
         });
         chain.push(final_handler as Arc<dyn Middleware>);
 
@@ -741,12 +744,42 @@ async fn handle_request(
         Err(err) => Response::from_error(err),
     };
 
+    // HEAD: same status and headers as GET, no body
+    let response = if is_head {
+        response.into_head()
+    } else {
+        response
+    };
+
     response.into_hyper()
 }
 
-async fn dispatch(handler: Option<DynHandler>, req: Request) -> Result<Response> {
-    match handler {
-        Some(handler) => handler.call(req).await,
-        None => Err(Error::not_found("Route not found")),
+/// Outcome of routing
+#[derive(Clone)]
+enum Route {
+    Found(DynHandler),
+    /// No handler for this method; `allow` is empty when the path is unknown
+    Miss {
+        allow: Vec<&'static str>,
+    },
+}
+
+async fn dispatch(route: Route, req: Request) -> Result<Response> {
+    match route {
+        Route::Found(handler) => handler.call(req).await,
+        Route::Miss { allow } if allow.is_empty() => Err(Error::not_found("Route not found")),
+        Route::Miss { allow } => {
+            let allow = allow.join(", ");
+            if req.method == http::Method::OPTIONS {
+                // automatic OPTIONS for known paths (CORS preflights are answered
+                // earlier, by the cors middleware)
+                Ok(Response::new(http::StatusCode::NO_CONTENT).with_header("allow", allow))
+            } else {
+                Ok(
+                    Response::from_error(Error::custom(405, "Method not allowed"))
+                        .with_header("allow", allow),
+                )
+            }
+        }
     }
 }

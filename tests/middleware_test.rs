@@ -195,7 +195,7 @@ async fn rate_limiter_answers_429_with_headers_and_skips_preflight() {
         (s1, h1["x-ratelimit-remaining"].to_str().unwrap()),
         (200, "1")
     );
-    assert_eq!(send(addr, "OPTIONS", "/").await.0, 404); // not counted
+    assert_eq!(send(addr, "OPTIONS", "/").await.0, 204); // automatic OPTIONS, not counted
     assert_eq!(send(addr, "GET", "/").await.0, 200);
 
     let (s3, h3, body) = send(addr, "GET", "/").await;
