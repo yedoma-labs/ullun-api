@@ -67,6 +67,7 @@ async fn main() {
 - **🖼️ Templates:** Built-in dependency-free engine, or plug in your own via `TemplateEngine`
 - **🚦 Rate limiting:** In-memory middleware with `429` / `retry-after`
 - **📖 OpenAPI 3.1:** Document generated from your routes, optional Swagger UI
+- **🧰 State & security helpers:** `App::state` / `Request::state`, CSPRNG tokens, constant-time comparison
 - **🔐 JWT** (`jwt` feature), **🗜️ gzip** (`compression` feature), **🔌 WebSockets** (`websocket` feature)
 
 ## ⚠️ Production Readiness
@@ -263,6 +264,29 @@ App::new()
     .await?;
 ```
 
+### Shared State
+
+```rust
+struct Db { users: RwLock<Vec<User>> }
+
+App::new()
+    .state(Db::default())                          // one value per type, shared by all requests
+    .get("/users", |req: Request| async move {
+        let db = req.state::<Db>()?;               // 500 if it was never registered
+        Ok(Response::json(&*db.users.read().await))
+    })
+```
+
+### Security Helpers
+
+```rust
+use ullun::security::{constant_time_eq, random_token, random_alphanumeric};
+
+let session_id = random_token(16)?;                // 128 bits from the OS CSPRNG, 32 hex chars
+let short_code = random_alphanumeric(7)?;          // uniform [A-Za-z0-9]
+let ok = constant_time_eq(given.as_bytes(), expected.as_bytes());   // for API keys, delete tokens, ...
+```
+
 ### Group Middleware
 
 ```rust
@@ -456,6 +480,15 @@ See the [`examples/`](examples/) directory. Basics:
 - [`todo_api.rs`](examples/todo_api.rs) - TODO API with token authentication
 - [`complete_api.rs`](examples/complete_api.rs) - In-memory store, sessions, groups
 - [`features_0_2_0.rs`](examples/features_0_2_0.rs) - Route groups, cookies, static files
+
+### Real-world applications
+
+Complete services that run as they are and are covered by integration tests (`tests/example_*.rs` start the very same app module over real HTTP). Each lives in `examples/<name>/` with a `main.rs` (configuration from the environment) and an `app.rs` (the testable application).
+
+| App | Run | What it demonstrates |
+|-----|-----|----------------------|
+| [`shortener`](examples/shortener) | `cargo run --example shortener` | URL shortener: API-key management API, public redirects, click counting, expiry, per-key rate limit, JSON file persistence, OpenAPI |
+| [`pastebin`](examples/pastebin) | `cargo run --example pastebin` | Paste service: HTML form + JSON API, escaped views with CSP, expiry, burn-after-read, delete tokens, storage cap, shared rate-limit budget |
 
 Scenarios (each is a self-contained deployment shape):
 
