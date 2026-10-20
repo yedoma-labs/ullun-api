@@ -344,11 +344,17 @@ fn split_params(s: &str) -> Vec<(String, Option<String>)> {
             chars.next();
             while let Some(c) = chars.next() {
                 match c {
-                    '\\' => {
-                        if let Some(escaped) = chars.next() {
-                            value.push(escaped);
+                    // Only \" and \\ are escapes. Browsers do not escape backslashes
+                    // and old ones send whole Windows paths (C:\dir\file.txt), which
+                    // must survive so that the directory part can be stripped later.
+                    '\\' => match chars.peek() {
+                        Some('"') | Some('\\') => {
+                            if let Some(escaped) = chars.next() {
+                                value.push(escaped);
+                            }
                         }
-                    }
+                        _ => value.push('\\'),
+                    },
                     '"' => break,
                     c => value.push(c),
                 }
@@ -470,6 +476,25 @@ mod tests {
         assert_eq!(parts[0].filename.as_deref(), Some("x;y.txt"));
         assert_eq!(parts[1].filename.as_deref(), Some("€ rates.txt"));
         assert_eq!(parts[2].name, "unquoted");
+    }
+
+    #[test]
+    fn windows_paths_in_file_names_keep_their_backslashes() {
+        let b = body(
+            "b",
+            &[
+                ("Content-Disposition: form-data; name=\"f\"; filename=\"C:\\Users\\me\\evil.exe\"", b"1"),
+                ("Content-Disposition: form-data; name=\"g\"; filename=\"\\\\server\\share\\a.txt\"", b"2"),
+            ],
+        );
+        let form = parse_ok(&b, "b");
+        let parts: Vec<_> = form.iter().collect();
+        assert_eq!(
+            parts[0].filename.as_deref(),
+            Some("C:\\Users\\me\\evil.exe")
+        );
+        assert_eq!(parts[0].safe_filename().as_deref(), Some("evil.exe"));
+        assert_eq!(parts[1].safe_filename().as_deref(), Some("a.txt"));
     }
 
     #[test]
