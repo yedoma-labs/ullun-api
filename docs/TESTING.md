@@ -53,7 +53,10 @@ tests/
 ├── example_shortener.rs  # Real-world example apps, run over real HTTP
 ├── example_pastebin.rs   #   (the app modules are included with #[path])
 ├── example_taskboard.rs  #   (feature jwt)
+├── example_statuspage.rs #   (real local targets, SSE, scheduler, shutdown)
 ├── conditional_test.rs   # ETag middleware and If-Match preconditions
+├── streaming_test.rs     # Streaming bodies, SSE, disconnect detection
+├── shutdown_test.rs      # Background tasks and graceful shutdown
 ├── openapi_test.rs       # Generated OpenAPI document and Swagger page
 ├── websocket_test.rs     # Handshake, echo, origin check, size limit (feature websocket)
 └── pentest.rs            # Security regression tests

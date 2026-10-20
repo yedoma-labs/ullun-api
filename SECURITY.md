@@ -48,6 +48,8 @@
 
 **Secrets and comparisons** - `ullun::security` provides CSPRNG tokens (`random_token`) and `constant_time_eq`; use them for session ids, API keys and delete tokens. Hash passwords with argon2 (see `examples/taskboard`).
 
+**Server-side requests (SSRF)** - If your service fetches URLs that users or admins provide, resolve the host yourself, reject loopback/private/link-local/CGNAT addresses (including IPv4-mapped IPv6) and connect to the vetted address only, as `examples/statuspage` does.
+
 **Rate Limiting** - `RateLimiter` middleware (per instance, in memory)
 - Keyed by peer IP by default; `trust_forwarded_for()` only behind your own reverse proxy
 - Use the reverse proxy (nginx, Caddy) or a shared store for limits across instances
