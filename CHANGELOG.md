@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1](https://github.com/yedoma-labs/ullun-api/compare/v0.4.0...v0.4.1) - 2026-10-20
+
+### Added
+
+- *(examples)* add an outgoing webhook dispatcher
+- *(security)* add SSRF-safe address resolution
+- *(jobs)* add an in-process job queue with retries
+
+### Other
+
+- *(security)* do not assume how resolvers treat bracketed IPv6 literals
+- document background jobs, safe outgoing requests and the webhooks example
+
 ## [0.4.0](https://github.com/yedoma-labs/ullun-api/compare/v0.3.4...v0.4.0) - 2026-10-20
 
 ### Added
