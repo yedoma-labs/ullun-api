@@ -287,6 +287,27 @@ let short_code = random_alphanumeric(7)?;          // uniform [A-Za-z0-9]
 let ok = constant_time_eq(given.as_bytes(), expected.as_bytes());   // for API keys, delete tokens, ...
 ```
 
+### Sessions and CSRF
+
+```rust
+App::new()
+    .middleware(SessionLayer::new())             // cookie holds only an unguessable id
+    .middleware(Csrf::new())                     // POST/PUT/PATCH/DELETE need the session's token
+    .post("/login", |req: Request| async move {
+        let session = req.session()?;
+        session.renew();                         // fresh id on login: no session fixation
+        session.set("user_id", 42)?;
+        session.flash("Welcome back")?;          // shown once, e.g. after the redirect
+        Ok(Response::redirect("/"))
+    })
+    .get("/form", |req: Request| async move {
+        let token = req.session()?.csrf_token()?;   // <input type="hidden" name="csrf_token" value="{token}">
+        Ok(Response::html(render_form(&token)))
+    })
+```
+
+`SessionLayer::insecure_cookies()` for plain-HTTP development, `SessionLayer::with_store(..)` for Redis or a database, `Csrf::exempt(..)` for bearer-token API calls. Anonymous visitors never receive a session cookie unless you write to the session.
+
 ### File Uploads and Downloads
 
 ```rust
@@ -586,6 +607,7 @@ Complete services that run as they are and are covered by integration tests (`te
 | [`shortener`](examples/shortener) | `cargo run --example shortener` | URL shortener: API-key management API, public redirects, click counting, expiry, per-key rate limit, JSON file persistence, OpenAPI |
 | [`taskboard`](examples/taskboard) (`jwt`) | `DEV=1 cargo run --example taskboard --features jwt` | REST API: registration/login (argon2 + JWT), per-user projects and tasks, 422 field errors, filter/sort/pagination, ETag + If-Match, login throttling, OpenAPI + Swagger UI |
 | [`statuspage`](examples/statuspage) | `DEV=1 cargo run --example statuspage` | Uptime monitor: background scheduler, HTTP/TCP checks with SSRF protection, public status page with live Server-Sent Events, admin API, graceful SIGTERM shutdown |
+| [`blog`](examples/blog) | `DEV=1 cargo run --example blog` | Blog/CMS: Markdown posts (escaped HTML, safe links), admin login with argon2, sessions renewed on login, CSRF on every form, throttled login, strict CSP, RSS and sitemap, drafts, ETags |
 | [`drive`](examples/drive) | `DEV=1 cargo run --example drive` | File drive: multipart uploads, per-user quotas, resumable downloads (Range), expiring share links with download limits, sandboxed risky types, per-route body limits |
 | [`pastebin`](examples/pastebin) | `cargo run --example pastebin` | Paste service: HTML form + JSON API, escaped views with CSP, expiry, burn-after-read, delete tokens, storage cap, shared rate-limit budget |
 

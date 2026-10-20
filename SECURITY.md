@@ -37,10 +37,9 @@
 - Use templating engines with auto-escaping (Tera, Askama)
 - Set Content-Security-Policy headers
 
-**CSRF (Cross-Site Request Forgery)** - No built-in CSRF protection
-- Implement CSRF tokens for state-changing operations
-- Use SameSite cookie attribute
-- Validate Origin/Referer headers
+**Sessions** - `ullun::session::SessionLayer`: unguessable 256-bit ids, `HttpOnly` + `SameSite=Lax` + `Secure` `__Host-` cookie, idle and absolute timeouts, no cookie for anonymous visitors. Call `session.renew()` on login (prevents fixation) and `session.destroy()` on logout. The default store is in memory; implement `SessionStore` for several instances.
+
+**CSRF (Cross-Site Request Forgery)** - `ullun::csrf::Csrf` (after `SessionLayer`) requires the session token on `POST`/`PUT`/`PATCH`/`DELETE` (header or form field, constant-time compare) and rejects cross-site `Origin` / `Sec-Fetch-Site`. Bearer-token API clients can be exempted. Render the token only on pages that need it (creating it starts a session).
 
 **Authentication/Authorization** - Building blocks only
 - `jwt` feature: HS256 tokens and `JwtAuth` middleware (rejects `alg: none`, constant-time signature check, 32-byte minimum secret). Authorization (roles, ownership) stays in your handlers
@@ -173,19 +172,19 @@ We will:
 2. **Rate limiting is per instance** - See `ullun::rate_limit`; use a proxy or shared store for global limits
 3. **Request size limits configurable** - Default 10MB, configure with `max_body_size()` (v0.2.0+)
 4. **Basic CORS implementation** - Production should use more sophisticated origin checking
-5. **No built-in CSRF protection** - Must implement manually
+5. **CSRF protection is opt-in** - Add `SessionLayer` and `Csrf` to every app that uses cookie authentication
 
 ## Security Roadmap
 
 Future versions will include:
 
-- [ ] Rate limiting middleware
-- [ ] Request size limits
-- [ ] JWT authentication helpers
-- [ ] CSRF token middleware
-- [ ] Security headers middleware (helmet-style)
+- [x] Rate limiting middleware (`ullun::rate_limit`)
+- [x] Request size limits (`App::max_body_size`, `App::body_limit`)
+- [x] JWT authentication helpers (`jwt` feature)
+- [x] Sessions and CSRF token middleware (`ullun::session`, `ullun::csrf`)
+- [x] OpenAPI security scheme generation (bearer and API key)
+- [ ] Security headers middleware (helmet-style; see `examples/blog`)
 - [ ] Audit logging framework
-- [ ] OpenAPI security scheme generation
 
 ## References
 
