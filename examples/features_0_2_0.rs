@@ -77,9 +77,7 @@ async fn main() {
         })
         // Cookie demo
         .get("/set-cookie", |_req: Request| async {
-            let cookie = Cookie::new("demo", "cookie-value")
-                .path("/")
-                .max_age(3600);
+            let cookie = Cookie::new("demo", "cookie-value").path("/").max_age(3600);
 
             Ok(Response::text("Cookie set!").cookie(cookie))
         })

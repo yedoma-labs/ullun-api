@@ -28,7 +28,7 @@ impl Cookie {
     pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
         let name = name.into();
         let value = value.into();
-        
+
         // Validate cookie name and value to prevent injection
         if name.contains(|c: char| c == ';' || c == '=' || c.is_control()) {
             panic!("Invalid cookie name: contains forbidden characters");
@@ -36,7 +36,7 @@ impl Cookie {
         if value.contains(|c: char| c == ';' || c.is_control()) {
             panic!("Invalid cookie value: contains forbidden characters");
         }
-        
+
         Self {
             name,
             value,

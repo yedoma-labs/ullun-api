@@ -48,7 +48,7 @@ impl App {
     pub fn group(mut self, prefix: &str, configure: impl FnOnce(RouteGroup) -> RouteGroup) -> Self {
         let group = RouteGroup::new(prefix);
         let group = configure(group);
-        
+
         // Register all routes with prefix
         for (method, path, handler) in group.routes {
             let full_path = format!("{}{}", group.prefix, path);
@@ -56,13 +56,13 @@ impl App {
                 panic!("Failed to register {} route {}: {}", method, full_path, e);
             }
         }
-        
+
         // Note: Group-level middlewares not yet supported - would apply globally
         // Use route-specific middleware wrapping instead for now
         if !group.middlewares.is_empty() {
             eprintln!("Warning: RouteGroup.middleware() is not yet implemented. Middlewares will be ignored.");
         }
-        
+
         self
     }
 
@@ -266,7 +266,11 @@ impl RouteGroup {
     where
         H: Handler,
     {
-        self.routes.push(("GET".to_string(), path.to_string(), Arc::new(handler) as DynHandler));
+        self.routes.push((
+            "GET".to_string(),
+            path.to_string(),
+            Arc::new(handler) as DynHandler,
+        ));
         self
     }
 
@@ -274,7 +278,11 @@ impl RouteGroup {
     where
         H: Handler,
     {
-        self.routes.push(("POST".to_string(), path.to_string(), Arc::new(handler) as DynHandler));
+        self.routes.push((
+            "POST".to_string(),
+            path.to_string(),
+            Arc::new(handler) as DynHandler,
+        ));
         self
     }
 
@@ -282,7 +290,11 @@ impl RouteGroup {
     where
         H: Handler,
     {
-        self.routes.push(("PUT".to_string(), path.to_string(), Arc::new(handler) as DynHandler));
+        self.routes.push((
+            "PUT".to_string(),
+            path.to_string(),
+            Arc::new(handler) as DynHandler,
+        ));
         self
     }
 
@@ -290,7 +302,11 @@ impl RouteGroup {
     where
         H: Handler,
     {
-        self.routes.push(("DELETE".to_string(), path.to_string(), Arc::new(handler) as DynHandler));
+        self.routes.push((
+            "DELETE".to_string(),
+            path.to_string(),
+            Arc::new(handler) as DynHandler,
+        ));
         self
     }
 
@@ -298,7 +314,11 @@ impl RouteGroup {
     where
         H: Handler,
     {
-        self.routes.push(("PATCH".to_string(), path.to_string(), Arc::new(handler) as DynHandler));
+        self.routes.push((
+            "PATCH".to_string(),
+            path.to_string(),
+            Arc::new(handler) as DynHandler,
+        ));
         self
     }
 
@@ -339,7 +359,7 @@ async fn handle_request(
                 }
             }
         }
-        
+
         // Limit actual stream reading (prevents bypass via chunked encoding)
         let limited = http_body_util::Limited::new(body, max_size);
         match limited.collect().await {
