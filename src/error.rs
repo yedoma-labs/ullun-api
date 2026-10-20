@@ -4,8 +4,16 @@ use std::fmt;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// One invalid field of a request, reported by [`Error::Validation`]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldError {
+    pub field: String,
+    pub message: String,
+}
+
 /// Framework error type that maps to HTTP status codes
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
     /// 400 Bad Request
     BadRequest(String),
@@ -17,6 +25,10 @@ pub enum Error {
     NotFound(String),
     /// 500 Internal Server Error
     Internal(String),
+    /// 422 Unprocessable Content with one entry per invalid field, rendered as
+    /// `{"error": "Validation failed", "status": 422, "fields": {"title": ["..."]}}`.
+    /// See [`Validator`](crate::validate::Validator).
+    Validation(Vec<FieldError>),
     /// Custom status code + message
     Custom(u16, String),
 }
@@ -29,6 +41,7 @@ impl Error {
             Error::Forbidden(_) => 403,
             Error::NotFound(_) => 404,
             Error::Internal(_) => 500,
+            Error::Validation(_) => 422,
             Error::Custom(code, _) => *code,
         }
     }
@@ -41,6 +54,7 @@ impl Error {
 
     pub fn message(&self) -> &str {
         match self {
+            Error::Validation(_) => "Validation failed",
             Error::BadRequest(msg)
             | Error::Unauthorized(msg)
             | Error::Forbidden(msg)
@@ -79,6 +93,19 @@ impl Error {
 
     pub fn internal(msg: impl Into<String>) -> Self {
         Error::Internal(msg.into())
+    }
+
+    /// 422 with the given invalid fields
+    pub fn validation(fields: Vec<FieldError>) -> Self {
+        Error::Validation(fields)
+    }
+
+    /// The invalid fields of a [`Error::Validation`], empty for other errors
+    pub fn fields(&self) -> &[FieldError] {
+        match self {
+            Error::Validation(fields) => fields,
+            _ => &[],
+        }
     }
 
     pub fn custom(status: u16, msg: impl Into<String>) -> Self {
