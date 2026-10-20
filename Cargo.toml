@@ -70,6 +70,8 @@ tokio-tungstenite = { version = "0.30", features = ["connect"] }
 futures-util = "0.3"
 # password hashing for the taskboard example
 argon2 = "0.6"
+# markdown for the blog example
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 criterion = { version = "0.8", features = ["async_tokio"] }
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 
@@ -116,3 +118,7 @@ required-features = ["compression"]
 name = "taskboard"
 path = "examples/taskboard/main.rs"
 required-features = ["jwt"]
+
+[[example]]
+name = "blog"
+path = "examples/blog/main.rs"
