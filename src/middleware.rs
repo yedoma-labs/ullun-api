@@ -39,6 +39,34 @@ impl Next {
     }
 }
 
+/// A handler wrapped in its own middleware stack (used by route groups)
+pub(crate) struct Layered {
+    middlewares: Vec<Arc<dyn Middleware>>,
+    inner: crate::handler::DynHandler,
+}
+
+impl Layered {
+    pub(crate) fn new(
+        middlewares: Vec<Arc<dyn Middleware>>,
+        inner: crate::handler::DynHandler,
+    ) -> Self {
+        Self { middlewares, inner }
+    }
+}
+
+#[async_trait]
+impl crate::handler::Handler for Layered {
+    async fn call(&self, req: Request) -> Result<Response> {
+        let inner = self.inner.clone();
+        let mut chain = self.middlewares.clone();
+        chain.push(Arc::new(move |req: Request, _next: Next| {
+            let inner = inner.clone();
+            async move { inner.call(req).await }
+        }));
+        Next::new(Arc::new(chain)).run(req).await
+    }
+}
+
 /// Implement Middleware for async functions
 #[async_trait]
 impl<F, Fut> Middleware for F

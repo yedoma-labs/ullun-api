@@ -18,17 +18,28 @@ async fn send(
     method: &str,
     path: &str,
 ) -> (u16, hyper::HeaderMap, String) {
+    send_with(addr, method, path, &[]).await
+}
+
+async fn send_with(
+    addr: std::net::SocketAddr,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+) -> (u16, hyper::HeaderMap, String) {
     let stream = TcpStream::connect(addr).await.unwrap();
     let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(stream))
         .await
         .unwrap();
     tokio::spawn(conn);
-    let req = hyper::Request::builder()
+    let mut builder = hyper::Request::builder()
         .method(method)
         .uri(path)
-        .header("host", "localhost")
-        .body(Full::<Bytes>::default())
-        .unwrap();
+        .header("host", "localhost");
+    for (k, v) in headers {
+        builder = builder.header(*k, *v);
+    }
+    let req = builder.body(Full::<Bytes>::default()).unwrap();
     let res = sender.send_request(req).await.unwrap();
     let (status, headers) = (res.status().as_u16(), res.headers().clone());
     let body = res.into_body().collect().await.unwrap().to_bytes();
@@ -104,4 +115,38 @@ async fn middleware_runs_in_registration_order() {
 
     assert_eq!(send(addr, "GET", "/").await.0, 200);
     assert_eq!(*order.lock().unwrap(), ["a", "b"]);
+}
+
+#[tokio::test]
+async fn group_middleware_only_wraps_group_routes() {
+    async fn admin_only(req: Request, next: Next) -> Result<Response> {
+        if req.headers.get("x-admin").is_none() {
+            return Err(Error::forbidden("admin only"));
+        }
+        next.run(req).await
+    }
+
+    let addr = spawn(
+        App::new()
+            .middleware(tag)
+            .get("/public", |_req: Request| async {
+                Ok(Response::text("public"))
+            })
+            .group("/admin", |g| {
+                // registered before the routes: still applies to all of them
+                g.middleware(admin_only)
+                    .get("/panel", |_req: Request| async {
+                        Ok(Response::text("panel"))
+                    })
+            }),
+    )
+    .await;
+
+    assert_eq!(send(addr, "GET", "/public").await.0, 200);
+    let (status, headers, _) = send(addr, "GET", "/admin/panel").await;
+    assert_eq!(status, 403);
+    // global middleware still wraps the group's rejection
+    assert_eq!(headers["x-tagged"], "yes");
+    let (status, _, body) = send_with(addr, "GET", "/admin/panel", &[("x-admin", "1")]).await;
+    assert_eq!((status, body.as_str()), (200, "panel"));
 }
