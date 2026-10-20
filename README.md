@@ -58,7 +58,7 @@ async fn main() {
 - **🎯 Simple:** Express.js-style routing, zero boilerplate
 - **🔒 Type-safe:** Path parameters validated at compile-time
 - **🔗 Middleware:** Chain middleware like Express.js
-- **📦 Batteries-included:** JSON serialization, error handling, CORS built-in
+- **📦 Batteries-included:** JSON serialization, error handling, CORS (`Cors`: exact origins, `Vary`, preflight, no credentialed wildcard) and security headers (`SecurityHeaders`, CSP builder with per-request nonces)
 - **🎨 Ergonomic:** Result<T, E> maps to HTTP status codes automatically
 - **🍪 Cookie Support:** Parse and set HTTP cookies with ease
 - **📁 Static Files:** Serve static files from directories
@@ -188,11 +188,14 @@ App::new()
 ### Middleware
 
 ```rust
-use ullun::middleware::{logger, cors};
+use ullun::cors::Cors;
+use ullun::middleware::logger;
+use ullun::security_headers::{Csp, SecurityHeaders};
 
 App::new()
     .middleware(logger)
-    .middleware(cors(vec!["*".to_string()]))
+    .middleware(Cors::new().allow_origin("https://app.example.com").allow_credentials())
+    .middleware(SecurityHeaders::new().csp(Csp::api()))
     .get("/", |_req| async { Ok(Response::text("Hello!")) })
     .run("127.0.0.1:3000")
     .await
@@ -418,7 +421,7 @@ Uploaded HTML, SVG and scripts must never be served inline from your own origin:
 
 ### HEAD, OPTIONS and 405
 
-`HEAD` is answered by the `GET` handler (headers only). A known path with the wrong method gets `405` with an `Allow` header, and `OPTIONS` on a known path answers `204` with `Allow`. CORS preflights are still handled by the `cors` middleware.
+`HEAD` is answered by the `GET` handler (headers only). A known path with the wrong method gets `405` with an `Allow` header, and `OPTIONS` on a known path answers `204` with `Allow`. CORS preflights are still handled by the `Cors` middleware.
 
 ### Streaming and Server-Sent Events
 

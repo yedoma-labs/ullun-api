@@ -97,9 +97,7 @@ async fn main() {
 
     // Order matters: CORS wraps auth failures, auth runs before the limiter
     App::new()
-        .middleware(ullun::middleware::cors(vec![
-            "https://app.example.com".to_string()
-        ]))
+        .middleware(ullun::cors::Cors::new().allow_origin("https://app.example.com"))
         .middleware(auth)
         .middleware(RateLimiter::new(5, Duration::from_secs(10)).key_by(api_key))
         .group("/v1", |g| {

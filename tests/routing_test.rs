@@ -102,9 +102,7 @@ async fn options_lists_the_supported_methods() {
 async fn middleware_still_wraps_405_and_cors_preflight_wins_over_automatic_options() {
     let s = spawn(
         users_app()
-            .middleware(ullun::middleware::cors(vec![
-                "https://app.example.com".into()
-            ]))
+            .middleware(ullun::cors::Cors::new().allow_origin("https://app.example.com"))
             .middleware(|req: Request, next: Next| async move {
                 let res = next.run(req).await?;
                 Ok(res.with_header("x-seen", "1"))
@@ -112,14 +110,23 @@ async fn middleware_still_wraps_405_and_cors_preflight_wins_over_automatic_optio
     )
     .await;
 
-    let wrong = s.put("/ping").send().await;
+    let wrong = s
+        .put("/ping")
+        .header("origin", "https://app.example.com")
+        .send()
+        .await;
     assert_eq!((wrong.status, wrong.header("x-seen")), (405, "1"));
     assert_eq!(
         wrong.header("access-control-allow-origin"),
         "https://app.example.com"
     );
 
-    let preflight = s.request("OPTIONS", "/ping").send().await;
+    let preflight = s
+        .request("OPTIONS", "/ping")
+        .header("origin", "https://app.example.com")
+        .header("access-control-request-method", "DELETE")
+        .send()
+        .await;
     assert_eq!(preflight.status, 204);
     // the CORS answer, not the bare Allow list
     assert!(preflight

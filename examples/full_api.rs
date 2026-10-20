@@ -20,7 +20,7 @@ async fn main() {
     App::new()
         // Middleware
         .middleware(ullun::middleware::logger)
-        .middleware(ullun::middleware::cors(vec!["*".to_string()]))
+        .middleware(ullun::cors::Cors::new().allow_any_origin())
         // Routes
         .get("/", |_req: Request| async { Ok(Response::text("API v1")) })
         .get("/users/{id}", get_user)

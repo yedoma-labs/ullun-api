@@ -37,6 +37,10 @@
 - Use templating engines with auto-escaping (Tera, Askama)
 - Set Content-Security-Policy headers
 
+**CORS** - `ullun::cors::Cors` matches the request's `Origin` exactly against your list (or a predicate), echoes it with `Vary: Origin`, answers preflights itself (403 for unknown origins or unlisted methods), adds the headers to error responses too, and never sends credentials together with a wildcard origin. The old `middleware::cors` function is deprecated and delegates to it.
+
+**Security headers** - `ullun::security_headers::SecurityHeaders` sets `nosniff`, `X-Frame-Options`, `Referrer-Policy`, COOP/CORP and a restrictive `Permissions-Policy` on every response, including errors and 404s, without overriding headers a handler set. `Csp` builds a Content-Security-Policy (`Csp::api()`, `Csp::web()`, report-only mode) and supports a fresh per-request nonce through the `{nonce}` placeholder and `Request::csp_nonce()`.
+
 **Sessions** - `ullun::session::SessionLayer`: unguessable 256-bit ids, `HttpOnly` + `SameSite=Lax` + `Secure` `__Host-` cookie, idle and absolute timeouts, no cookie for anonymous visitors. Call `session.renew()` on login (prevents fixation) and `session.destroy()` on logout. The default store is in memory; implement `SessionStore` for several instances.
 
 **CSRF (Cross-Site Request Forgery)** - `ullun::csrf::Csrf` (after `SessionLayer`) requires the session token on `POST`/`PUT`/`PATCH`/`DELETE` (header or form field, constant-time compare) and rejects cross-site `Origin` / `Sec-Fetch-Site`. Bearer-token API clients can be exempted. Render the token only on pages that need it (creating it starts a session).
@@ -175,8 +179,7 @@ We will:
 1. **Authentication is opt-in** - Use `JwtAuth` (feature `jwt`) or your own middleware
 2. **Rate limiting is per instance** - See `ullun::rate_limit`; use a proxy or shared store for global limits
 3. **Request size limits configurable** - Default 10MB, configure with `max_body_size()` (v0.2.0+)
-4. **Basic CORS implementation** - Production should use more sophisticated origin checking
-5. **CSRF protection is opt-in** - Add `SessionLayer` and `Csrf` to every app that uses cookie authentication
+4. **CSRF protection is opt-in** - Add `SessionLayer` and `Csrf` to every app that uses cookie authentication
 
 ## Security Roadmap
 
