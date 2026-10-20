@@ -47,6 +47,7 @@ pub mod rate_limit;
 pub mod request;
 pub mod response;
 pub mod router;
+pub mod security;
 pub mod static_files;
 pub mod template;
 #[cfg(feature = "websocket")]
