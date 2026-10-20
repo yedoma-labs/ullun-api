@@ -39,6 +39,7 @@ pub mod compression;
 pub mod conditional;
 pub mod cookies;
 pub mod error;
+pub mod files;
 pub mod handler;
 #[cfg(feature = "jwt")]
 pub mod jwt;

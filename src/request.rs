@@ -3,8 +3,8 @@
 use crate::cookies::Cookies;
 use crate::error::{Error, Result};
 use serde::de::DeserializeOwned;
-use std::cell::OnceCell;
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 /// Path parameters extracted from route
 #[derive(Debug, Clone)]
@@ -146,7 +146,7 @@ pub struct Request {
     pub remote_addr: Option<std::net::SocketAddr>,
     pub(crate) state: Option<std::sync::Arc<StateMap>>,
     pub(crate) shutdown: Option<crate::shutdown::Shutdown>,
-    cookies: OnceCell<Cookies>,
+    cookies: OnceLock<Cookies>,
 }
 
 impl Request {
@@ -172,7 +172,7 @@ impl Request {
             remote_addr: None,
             state: None,
             shutdown: None,
-            cookies: OnceCell::new(),
+            cookies: OnceLock::new(),
         }
     }
 
