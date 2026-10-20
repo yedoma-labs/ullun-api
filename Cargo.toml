@@ -145,3 +145,8 @@ required-features = ["websocket", "jwt"]
 [[example]]
 name = "webhooks"
 path = "examples/webhooks/main.rs"
+
+[[example]]
+name = "secure_api"
+path = "examples/secure_api/main.rs"
+required-features = ["tls"]

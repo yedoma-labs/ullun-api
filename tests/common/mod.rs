@@ -2,6 +2,9 @@
 
 #![allow(dead_code)]
 
+#[cfg(feature = "tls")]
+pub mod pki;
+
 use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
 use hyper_util::rt::TokioIo;
