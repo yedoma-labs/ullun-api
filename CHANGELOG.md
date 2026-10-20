@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0](https://github.com/yedoma-labs/ullun-api/compare/v0.2.3...v0.3.0) - 2026-10-20
+
+### Added
+
+- *(examples)* add a task board REST API
+- *(conditional)* add ETag middleware and If-Match preconditions
+- *(request)* parse typed path parameters
+- *(error)* [**breaking**] add structured validation errors
+
+### Other
+
+- document validation, typed path parameters and conditional requests
+
 ## [0.2.3](https://github.com/yedoma-labs/ullun-api/compare/v0.2.2...v0.2.3) - 2026-10-20
 
 ### Added
