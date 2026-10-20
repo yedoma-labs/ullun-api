@@ -287,6 +287,33 @@ let short_code = random_alphanumeric(7)?;          // uniform [A-Za-z0-9]
 let ok = constant_time_eq(given.as_bytes(), expected.as_bytes());   // for API keys, delete tokens, ...
 ```
 
+### Validation
+
+```rust
+use ullun::validate::Validator;
+
+let mut v = Validator::new();
+v.len_between("title", &body.title, 1, 120);
+v.email("email", &body.email);
+v.range("priority", body.priority, 0, 3);
+v.finish()?;      // 422 {"error":"Validation failed","fields":{"title":["..."],"priority":["..."]}}
+```
+
+All problems are reported at once. Typed path parameters: `let id: u64 = req.params.parse("id")?;` (400 naming the parameter).
+
+### ETags and optimistic concurrency
+
+```rust
+use ullun::conditional::{require_if_match, ETags};
+
+App::new()
+    .middleware(ETags)                                   // ETag on GET responses, 304 for If-None-Match
+    .patch("/tasks/{id}", |req: Request| async move {
+        require_if_match(&req, &current_etag)?;          // 428 without If-Match, 412 when stale
+        // ... apply the update, bump the version, return the new ETag
+    })
+```
+
 ### Group Middleware
 
 ```rust
@@ -488,6 +515,7 @@ Complete services that run as they are and are covered by integration tests (`te
 | App | Run | What it demonstrates |
 |-----|-----|----------------------|
 | [`shortener`](examples/shortener) | `cargo run --example shortener` | URL shortener: API-key management API, public redirects, click counting, expiry, per-key rate limit, JSON file persistence, OpenAPI |
+| [`taskboard`](examples/taskboard) (`jwt`) | `DEV=1 cargo run --example taskboard --features jwt` | REST API: registration/login (argon2 + JWT), per-user projects and tasks, 422 field errors, filter/sort/pagination, ETag + If-Match, login throttling, OpenAPI + Swagger UI |
 | [`pastebin`](examples/pastebin) | `cargo run --example pastebin` | Paste service: HTML form + JSON API, escaped views with CSP, expiry, burn-after-read, delete tokens, storage cap, shared rate-limit budget |
 
 Scenarios (each is a self-contained deployment shape):
