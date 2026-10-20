@@ -18,7 +18,7 @@ jobs:
   # ---- Conventional Commits (PRs only; main is protected by the PR checks) ----
   commits:
     name: Conventional Commits
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.event_name == 'pull_request'
     permissions:
       contents: read
@@ -42,7 +42,7 @@ jobs:
   # ---- Lint (runs on PRs and on main) ----
   fmt:
     name: Format
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -52,7 +52,7 @@ jobs:
 
   clippy:
     name: Clippy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -64,7 +64,7 @@ jobs:
 
   docs:
     name: Rustdoc
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       RUSTDOCFLAGS: -D warnings
     steps:
@@ -75,15 +75,16 @@ jobs:
 
   security-audit:
     name: Security Audit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
-      checks: write
     steps:
       - uses: actions/checkout@v7
-      - uses: rustsec/audit-check@v2
+      # the cargo-audit CLI directly: the rustsec/audit-check action still runs on Node 20
+      - uses: taiki-e/install-action@v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          tool: cargo-audit
+      - run: cargo audit
 
   # ---- Tests ----
   test:
@@ -92,7 +93,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -104,7 +105,7 @@ jobs:
   # ---- Build: release profile, all examples, benches compile ----
   build:
     name: Build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -114,7 +115,7 @@ jobs:
 
   coverage:
     name: Code Coverage
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -131,7 +132,7 @@ jobs:
   # ---- Release: only on main, only when lint + tests + build are green ----
   release:
     name: Release (conventional commits)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [fmt, clippy, docs, security-audit, test, build]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     concurrency:
