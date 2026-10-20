@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3](https://github.com/yedoma-labs/ullun-api/compare/v0.4.2...v0.4.3) - 2026-10-20
+
+### Added
+
+- *(limits)* add slowloris protection, connection caps, timeout and load shedding
+
+### Other
+
+- *(bench)* add portable framework comparison against axum and actix-web
+
 ## [0.4.2](https://github.com/yedoma-labs/ullun-api/compare/v0.4.1...v0.4.2) - 2026-10-20
 
 ### Added
