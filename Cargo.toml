@@ -68,6 +68,8 @@ futures-util = { version = "0.3", default-features = false, features = ["sink"],
 [dev-dependencies]
 tokio-tungstenite = { version = "0.30", features = ["connect"] }
 futures-util = "0.3"
+# password hashing for the taskboard example
+argon2 = "0.6"
 criterion = { version = "0.8", features = ["async_tokio"] }
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 
@@ -109,3 +111,8 @@ required-features = ["websocket"]
 name = "templates_site"
 path = "examples/templates_site.rs"
 required-features = ["compression"]
+
+[[example]]
+name = "taskboard"
+path = "examples/taskboard/main.rs"
+required-features = ["jwt"]
