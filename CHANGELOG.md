@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0](https://github.com/yedoma-labs/ullun-api/compare/v0.3.4...v0.4.0) - 2026-10-20
+
+### Added
+
+- *(examples)* add a chat server with rooms
+- *(app)* add Request::state_arc and WebSocket routes in groups
+- *(websocket)* [**breaking**] add keep-alive pings, idle timeout, send_json and close codes
+- *(hub)* add publish/subscribe rooms
+
+### Other
+
+- document rooms and the chat example
+
 ## [0.3.4](https://github.com/yedoma-labs/ullun-api/compare/v0.3.3...v0.3.4) - 2026-10-20
 
 ### Added
