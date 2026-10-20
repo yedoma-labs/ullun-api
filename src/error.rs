@@ -33,6 +33,12 @@ impl Error {
         }
     }
 
+    /// The status as an [`http::StatusCode`] (invalid custom codes become 500)
+    pub fn status(&self) -> http::StatusCode {
+        http::StatusCode::from_u16(self.status_code())
+            .unwrap_or(http::StatusCode::INTERNAL_SERVER_ERROR)
+    }
+
     pub fn message(&self) -> &str {
         match self {
             Error::BadRequest(msg)
