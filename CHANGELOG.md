@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2](https://github.com/yedoma-labs/ullun-api/compare/v0.3.1...v0.3.2) - 2026-10-20
+
+### Added
+
+- *(examples)* add a file drive
+- *(files)* serve files with ranges, conditional requests and streaming
+- *(app)* set request body limits per route prefix
+- *(multipart)* parse multipart/form-data request bodies
+- *(router)* answer HEAD, OPTIONS and 405 Method Not Allowed
+
+### Fixed
+
+- *(app)* drain rejected request bodies before answering 413
+- *(multipart)* keep backslashes in file names
+
+### Other
+
+- document uploads, file serving, per-route limits and HEAD/405 handling
+
 ## [0.3.1](https://github.com/yedoma-labs/ullun-api/compare/v0.3.0...v0.3.1) - 2026-10-20
 
 ### Added
