@@ -152,6 +152,42 @@ impl App {
         self
     }
 
+    /// Accept WebSocket connections on `path` (feature `websocket`)
+    ///
+    /// The handler receives the original request (path params, query, headers,
+    /// extensions set by middleware) and the upgraded socket, and runs on its
+    /// own task until it returns.
+    #[cfg(feature = "websocket")]
+    pub fn ws<F, Fut>(self, path: &str, handler: F) -> Self
+    where
+        F: Fn(Request, crate::websocket::WebSocket) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
+        self.ws_with(path, crate::websocket::WsOptions::default(), handler)
+    }
+
+    /// Like [`App::ws`] with explicit size limit and allowed origins
+    #[cfg(feature = "websocket")]
+    pub fn ws_with<F, Fut>(
+        mut self,
+        path: &str,
+        options: crate::websocket::WsOptions,
+        handler: F,
+    ) -> Self
+    where
+        F: Fn(Request, crate::websocket::WebSocket) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
+        let route = crate::websocket::WsRoute::new(handler, options);
+        if let Err(e) = self
+            .router
+            .insert("GET", path, Arc::new(route) as DynHandler)
+        {
+            panic!("Failed to register WebSocket route {}: {}", path, e);
+        }
+        self
+    }
+
     /// Add middleware
     pub fn middleware<M>(mut self, middleware: M) -> Self
     where
@@ -261,6 +297,7 @@ impl App {
                             }
                         }),
                     )
+                    .with_upgrades()
                     .await
                 {
                     eprintln!("Error serving connection: {:?}", err);

@@ -36,6 +36,8 @@ pub mod response;
 pub mod router;
 pub mod static_files;
 pub mod template;
+#[cfg(feature = "websocket")]
+pub mod websocket;
 
 pub mod prelude {
     pub use crate::app::{App, RouteGroup};
