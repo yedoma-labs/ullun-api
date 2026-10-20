@@ -2,6 +2,7 @@
 
 use crate::error::{Error, Result};
 use crate::handler::{BoxFuture, DynHandler, Handler, HandlerWithParams};
+use crate::limits::{self, ConnGuard, ConnLimits};
 use crate::middleware::{Layered, Middleware, Next};
 use crate::openapi::{self, OpenApiInfo, Operation, RouteKind};
 use crate::request::{Params, Request, StateMap};
@@ -11,7 +12,7 @@ use crate::shutdown::{Context, Shutdown};
 use http_body_util::BodyExt;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioIo, TokioTimer};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -30,6 +31,9 @@ pub struct App {
     background: Vec<BackgroundTask>,
     shutdown_grace: Duration,
     body_limits: Vec<(String, Option<usize>)>,
+    header_read_timeout: Option<Duration>,
+    max_connections: Option<usize>,
+    max_connections_per_ip: Option<usize>,
     #[cfg(feature = "tls")]
     tls: Option<crate::tls::TlsConfig>,
     #[cfg(feature = "tls")]
@@ -53,6 +57,7 @@ struct Shared {
     body_limits: Vec<(String, Option<usize>)>,
     state: Arc<StateMap>,
     shutdown: Shutdown,
+    header_read_timeout: Option<Duration>,
 }
 
 /// Route group builder
@@ -78,6 +83,9 @@ impl App {
             background: Vec::new(),
             shutdown_grace: Duration::from_secs(10),
             body_limits: Vec::new(),
+            header_read_timeout: Some(Duration::from_secs(30)),
+            max_connections: None,
+            max_connections_per_ip: None,
             #[cfg(feature = "tls")]
             tls: None,
             #[cfg(feature = "tls")]
@@ -173,6 +181,31 @@ impl App {
     #[cfg(feature = "tls")]
     pub fn tls_reload_every(mut self, interval: Duration) -> Self {
         self.tls_reload = Some(interval);
+        self
+    }
+
+    /// How long a client may take to send the request headers (default 30
+    /// seconds, `None` disables). Also applies to an idle keep-alive connection
+    /// waiting for its next request, and stops slowloris-style clients that
+    /// trickle bytes to hold connections open.
+    pub fn header_read_timeout(mut self, timeout: impl Into<Option<Duration>>) -> Self {
+        self.header_read_timeout = timeout.into();
+        self
+    }
+
+    /// Cap on simultaneously open connections. Further connections get an
+    /// immediate `503` with `Retry-After` and are closed (plain `503` bytes
+    /// even on a TLS port, which a TLS client reports as a failed handshake).
+    pub fn max_connections(mut self, max: usize) -> Self {
+        self.max_connections = Some(max.max(1));
+        self
+    }
+
+    /// Cap on simultaneously open connections from one peer IP, so a single
+    /// client cannot use up [`App::max_connections`]. Behind a reverse proxy
+    /// every connection comes from the proxy: leave this unset there.
+    pub fn max_connections_per_ip(mut self, max: usize) -> Self {
+        self.max_connections_per_ip = Some(max.max(1));
         self
     }
 
@@ -454,6 +487,7 @@ impl App {
         let tls = self.tls.take();
         #[cfg(feature = "tls")]
         let tls_reload = self.tls_reload;
+        let conn_limits = ConnLimits::new(self.max_connections, self.max_connections_per_ip);
         let (trigger, rx) = tokio::sync::watch::channel(false);
         let shutdown = Shutdown::new(rx);
         let shared = Arc::new(self.into_shared(shutdown.clone()));
@@ -492,16 +526,21 @@ impl App {
                 _ = &mut signal => break,
                 accepted = listener.accept() => match accepted {
                     Ok((stream, peer)) => {
+                        let Some(guard) = conn_limits.admit(peer.ip()) else {
+                            tokio::spawn(limits::refuse(stream));
+                            continue;
+                        };
                         #[cfg(feature = "tls")]
                         if let Some(config) = tls.clone() {
                             let (shared, shutdown, done) = (shared.clone(), shutdown.clone(), done_tx.clone());
                             tokio::spawn(async move {
+                                let _guard = guard;
                                 // the handshake runs here, not in the accept loop: a slow
                                 // client must not hold up everybody else
                                 // scanners, plain HTTP on the TLS port and aborted handshakes just end here
                                 if let Ok((tls_stream, client_cert)) = config.accept(stream).await {
                                     let info = ConnInfo { peer, secure: true, client_cert };
-                                    serve_connection(tls_stream, info, shared, shutdown, done).await;
+                                    serve_connection(tls_stream, info, shared, shutdown, done, _guard).await;
                                 }
                             });
                             continue;
@@ -513,6 +552,7 @@ impl App {
                             shared.clone(),
                             shutdown.clone(),
                             done_tx.clone(),
+                            guard,
                         ));
                     }
                     Err(e) => {
@@ -550,6 +590,7 @@ impl App {
             body_limits: self.body_limits,
             state: Arc::new(self.state),
             shutdown,
+            header_read_timeout: self.header_read_timeout,
         }
     }
 
@@ -603,6 +644,7 @@ async fn serve_connection<S>(
     shared: Arc<Shared>,
     shutdown: Shutdown,
     _done: tokio::sync::mpsc::Sender<()>,
+    _guard: ConnGuard,
 ) where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
@@ -612,17 +654,24 @@ async fn serve_connection<S>(
         let (shared, info) = (shared.clone(), info.clone());
         async move { Ok::<_, Infallible>(handle_request(req, &info, shared).await) }
     });
-    let conn = http1::Builder::new()
-        .serve_connection(io, service)
-        .with_upgrades();
+    let mut builder = http1::Builder::new();
+    if let Some(timeout) = shared.header_read_timeout {
+        builder
+            .timer(TokioTimer::new())
+            .header_read_timeout(timeout);
+    }
+    let conn = builder.serve_connection(io, service).with_upgrades();
     tokio::pin!(conn);
 
     let mut draining = false;
     loop {
         tokio::select! {
             result = conn.as_mut() => {
-                if let Err(err) = result {
-                    eprintln!("Error serving connection: {:?}", err);
+                // a header timeout is routine (slow or idle client), not worth a log line
+                if let Err(err) = &result {
+                    if !err.is_timeout() {
+                        eprintln!("Error serving connection: {:?}", err);
+                    }
                 }
                 return;
             }
@@ -797,6 +846,7 @@ async fn handle_request(
         body_limits,
         state,
         shutdown,
+        ..
     } = &*shared;
     let method = req.method().to_string();
     let is_head = req.method() == http::Method::HEAD;

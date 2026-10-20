@@ -66,6 +66,7 @@ async fn main() {
 - **📝 Forms:** `application/x-www-form-urlencoded` into typed structs
 - **🖼️ Templates:** Built-in dependency-free engine, or plug in your own via `TemplateEngine`
 - **🚦 Rate limiting:** In-memory middleware with `429` / `retry-after`
+- **🛡️ Resilience:** header-read timeout (slowloris), connection caps (total and per IP), `Timeout` (504) and `ConcurrencyLimit` load shedding (503 + `Retry-After`)
 - **📖 OpenAPI 3.1:** Document generated from your routes, optional Swagger UI
 - **🧰 State & security helpers:** `App::state` / `Request::state`, CSPRNG tokens, constant-time comparison
 - **🔐 JWT** (`jwt` feature), **🗜️ gzip** (`compression` feature), **🔌 WebSockets** (`websocket` feature)
