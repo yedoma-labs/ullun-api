@@ -22,6 +22,8 @@
 //! ```
 
 pub mod app;
+#[cfg(feature = "compression")]
+pub mod compression;
 pub mod cookies;
 pub mod error;
 pub mod handler;
