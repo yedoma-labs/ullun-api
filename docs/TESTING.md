@@ -48,6 +48,10 @@ tests/
 ├── middleware_test.rs    # Middleware order, groups, CORS preflight, 404 wrapping, rate limiter,
 │                         #   extensions; JWT and gzip middleware (features jwt, compression)
 ├── static_files_test.rs  # Static serving, index files, traversal (ephemeral port)
+├── common/mod.rs         # spawn(app) + fluent HTTP client for tests
+├── state_test.rs         # Shared application state
+├── example_shortener.rs  # Real-world example apps, run over real HTTP
+├── example_pastebin.rs   #   (the app modules are included with #[path])
 ├── openapi_test.rs       # Generated OpenAPI document and Swagger page
 ├── websocket_test.rs     # Handshake, echo, origin check, size limit (feature websocket)
 └── pentest.rs            # Security regression tests
@@ -87,6 +91,21 @@ fn test_error_mapping() {
     assert_eq!(err.status_code(), 400);
     assert_eq!(err.message(), "test");
 }
+```
+
+### Testing example apps
+
+The services in `examples/<name>/` keep their logic in `app.rs` (`pub fn build(config) -> App`) and only wire configuration in `main.rs`. Tests include the module and run it with a fake clock:
+
+```rust
+mod common;
+#[allow(dead_code)]
+#[path = "../examples/shortener/app.rs"]
+mod shortener;
+
+let server = common::spawn(shortener::build(config)).await;
+let res = server.post("/api/links").header("x-api-key", "k").json(&body).send().await;
+assert_eq!(res.status, 201);
 ```
 
 ### Testing against a real server
