@@ -72,6 +72,9 @@ futures-util = "0.3"
 argon2 = "0.6"
 # pooled HTTP client for the gateway example
 hyper-util = { version = "0.1.21", features = ["client-legacy", "http1", "tokio"] }
+# HMAC signatures for the webhooks example
+hmac = "0.13"
+sha2 = "0.11"
 # markdown for the blog example
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 criterion = { version = "0.8", features = ["async_tokio"] }
@@ -133,3 +136,7 @@ path = "examples/gateway/main.rs"
 name = "chat"
 path = "examples/chat/main.rs"
 required-features = ["websocket", "jwt"]
+
+[[example]]
+name = "webhooks"
+path = "examples/webhooks/main.rs"
