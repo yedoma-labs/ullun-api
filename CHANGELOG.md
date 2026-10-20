@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2](https://github.com/yedoma-labs/ullun-api/compare/v0.4.1...v0.4.2) - 2026-10-20
+
+### Added
+
+- *(examples)* add an HTTPS service with mutual-TLS admin routes
+- *(tls)* serve HTTPS with reloadable certificates and client certificates
+
+### Other
+
+- *(examples)* send chat history test messages in batches
+- document HTTPS, client certificates and the secure_api example
+
 ## [0.4.1](https://github.com/yedoma-labs/ullun-api/compare/v0.4.0...v0.4.1) - 2026-10-20
 
 ### Added
