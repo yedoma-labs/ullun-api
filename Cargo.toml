@@ -128,3 +128,8 @@ path = "examples/blog/main.rs"
 [[example]]
 name = "gateway"
 path = "examples/gateway/main.rs"
+
+[[example]]
+name = "chat"
+path = "examples/chat/main.rs"
+required-features = ["websocket", "jwt"]
