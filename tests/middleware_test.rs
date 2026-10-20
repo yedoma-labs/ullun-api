@@ -177,3 +177,58 @@ async fn middleware_passes_data_via_extensions_and_peer_addr_is_set() {
     assert_eq!(status, 200);
     assert_eq!(body, r#"{"peer":"127.0.0.1","user":"ann"}"#);
 }
+
+#[tokio::test]
+async fn rate_limiter_answers_429_with_headers_and_skips_preflight() {
+    use std::time::Duration;
+    use ullun::rate_limit::RateLimiter;
+
+    let addr = spawn(
+        App::new()
+            .middleware(RateLimiter::new(2, Duration::from_secs(60)))
+            .get("/", |_req: Request| async { Ok(Response::text("ok")) }),
+    )
+    .await;
+
+    let (s1, h1, _) = send(addr, "GET", "/").await;
+    assert_eq!(
+        (s1, h1["x-ratelimit-remaining"].to_str().unwrap()),
+        (200, "1")
+    );
+    assert_eq!(send(addr, "OPTIONS", "/").await.0, 404); // not counted
+    assert_eq!(send(addr, "GET", "/").await.0, 200);
+
+    let (s3, h3, body) = send(addr, "GET", "/").await;
+    assert_eq!(s3, 429);
+    assert_eq!(h3["x-ratelimit-remaining"], "0");
+    assert!(h3["retry-after"].to_str().unwrap().parse::<u64>().unwrap() >= 1);
+    assert!(body.contains("Too many requests"));
+}
+
+#[tokio::test]
+async fn rate_limiter_key_by_header_and_exemption() {
+    use std::time::Duration;
+    use ullun::rate_limit::RateLimiter;
+
+    let limiter = RateLimiter::new(1, Duration::from_secs(60)).key_by(|req| {
+        req.headers
+            .get("x-api-key")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned)
+    });
+    let addr = spawn(
+        App::new()
+            .middleware(limiter)
+            .get("/", |_req: Request| async { Ok(Response::text("ok")) }),
+    )
+    .await;
+
+    let key = |k: &'static str| [("x-api-key", k)];
+    assert_eq!(send_with(addr, "GET", "/", &key("a")).await.0, 200);
+    assert_eq!(send_with(addr, "GET", "/", &key("a")).await.0, 429);
+    assert_eq!(send_with(addr, "GET", "/", &key("b")).await.0, 200);
+    // no key -> exempt
+    for _ in 0..3 {
+        assert_eq!(send(addr, "GET", "/").await.0, 200);
+    }
+}
