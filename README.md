@@ -104,7 +104,7 @@ async fn main() {
 
 ```toml
 [dependencies]
-ullun-api = "0.2"
+ullun-api = "0.3"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -120,7 +120,7 @@ Optional features (everything else is always on):
 | `full` | all of the above | |
 
 ```toml
-ullun-api = { version = "0.2", features = ["jwt", "websocket"] }
+ullun-api = { version = "0.3", features = ["jwt", "websocket"] }
 ```
 
 ## Quick Start
@@ -286,6 +286,47 @@ let session_id = random_token(16)?;                // 128 bits from the OS CSPRN
 let short_code = random_alphanumeric(7)?;          // uniform [A-Za-z0-9]
 let ok = constant_time_eq(given.as_bytes(), expected.as_bytes());   // for API keys, delete tokens, ...
 ```
+
+### Streaming and Server-Sent Events
+
+```rust
+use ullun::sse::{sse, Event};
+
+async fn ticker(req: Request) -> Result<Response> {
+    let (tx, res) = sse();                       // text/event-stream, no caching, no proxy buffering
+    let shutdown = req.shutdown_signal();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = shutdown.wait() => return,   // end with the server
+                _ = tx.closed() => return,       // browser went away
+                _ = tokio::time::sleep(Duration::from_secs(1)) => {
+                    if tx.send(Event::data("tick").event("tick")).await.is_err() { return; }
+                }
+            }
+        }
+    });
+    Ok(res)
+}
+```
+
+`Response::stream()` gives the same for arbitrary bodies (downloads, exports): chunks are sent as they are produced, with back-pressure, and `send` fails once the client disconnects. `ETags` and `Compression` leave streams alone.
+
+### Background Tasks and Graceful Shutdown
+
+```rust
+App::new()
+    .state(Jobs::default())
+    .background(|ctx: Context| async move {
+        while ctx.sleep(Duration::from_secs(60)).await {     // false once shutdown begins
+            ctx.state::<Jobs>().unwrap().purge_expired();
+        }
+    })
+    .shutdown_grace(Duration::from_secs(15))                  // default 10 s
+    .run("0.0.0.0:3000")                                      // stops on CTRL+C and SIGTERM
+```
+
+On shutdown the server stops accepting, closes idle keep-alive connections, lets running requests finish, signals `Request::shutdown_signal()` / `Context::shutdown()`, and waits for background tasks, each for at most the grace period. For embedding and tests use `serve_with_shutdown(listener, signal)`.
 
 ### Validation
 
@@ -516,6 +557,7 @@ Complete services that run as they are and are covered by integration tests (`te
 |-----|-----|----------------------|
 | [`shortener`](examples/shortener) | `cargo run --example shortener` | URL shortener: API-key management API, public redirects, click counting, expiry, per-key rate limit, JSON file persistence, OpenAPI |
 | [`taskboard`](examples/taskboard) (`jwt`) | `DEV=1 cargo run --example taskboard --features jwt` | REST API: registration/login (argon2 + JWT), per-user projects and tasks, 422 field errors, filter/sort/pagination, ETag + If-Match, login throttling, OpenAPI + Swagger UI |
+| [`statuspage`](examples/statuspage) | `DEV=1 cargo run --example statuspage` | Uptime monitor: background scheduler, HTTP/TCP checks with SSRF protection, public status page with live Server-Sent Events, admin API, graceful SIGTERM shutdown |
 | [`pastebin`](examples/pastebin) | `cargo run --example pastebin` | Paste service: HTML form + JSON API, escaped views with CSP, expiry, burn-after-read, delete tokens, storage cap, shared rate-limit budget |
 
 Scenarios (each is a self-contained deployment shape):
