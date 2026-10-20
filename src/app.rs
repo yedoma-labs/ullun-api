@@ -51,6 +51,8 @@ pub struct RouteGroup {
     middlewares: Vec<Arc<dyn Middleware>>,
     docs: Vec<(String, String, Operation)>, // (method, path relative to prefix, docs)
     body_limit: Option<Option<usize>>,
+    /// Paths registered with `ws_with`, documented as WebSocket upgrades
+    ws_paths: Vec<String>,
 }
 
 impl App {
@@ -171,7 +173,12 @@ impl App {
             } else {
                 Arc::new(Layered::new(middlewares.clone(), handler))
             };
-            if let Err(e) = self.router.insert(&method, &full_path, handler) {
+            let kind = if method == "GET" && group.ws_paths.contains(&path) {
+                RouteKind::WebSocket
+            } else {
+                RouteKind::Http
+            };
+            if let Err(e) = self.router.insert_as(kind, &method, &full_path, handler) {
                 panic!("Failed to register {} route {}: {}", method, full_path, e);
             }
         }
@@ -586,7 +593,32 @@ impl RouteGroup {
             middlewares: Vec::new(),
             docs: Vec::new(),
             body_limit: None,
+            ws_paths: Vec::new(),
         }
+    }
+
+    /// Accept WebSocket connections on `path` below the group prefix; the
+    /// group's middleware (authentication, ticket checks, ...) runs before the
+    /// upgrade (feature `websocket`)
+    #[cfg(feature = "websocket")]
+    pub fn ws_with<F, Fut>(
+        mut self,
+        path: &str,
+        options: crate::websocket::WsOptions,
+        handler: F,
+    ) -> Self
+    where
+        F: Fn(Request, crate::websocket::WebSocket) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
+        let route = crate::websocket::WsRoute::new(handler, options);
+        self.routes.push((
+            "GET".to_string(),
+            path.to_string(),
+            Arc::new(route) as DynHandler,
+        ));
+        self.ws_paths.push(path.to_string());
+        self
     }
 
     /// Request body limit for this group's routes (`None` = unlimited),

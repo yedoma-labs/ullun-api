@@ -4,7 +4,7 @@ use crate::cookies::Cookies;
 use crate::error::{Error, Result};
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 /// Path parameters extracted from route
 #[derive(Debug, Clone)]
@@ -115,19 +115,25 @@ impl Default for Query {
 /// Type-keyed storage for shared application state
 #[derive(Default)]
 pub(crate) struct StateMap {
-    values: HashMap<std::any::TypeId, Box<dyn std::any::Any + Send + Sync>>,
+    values: HashMap<std::any::TypeId, Arc<dyn std::any::Any + Send + Sync>>,
 }
 
 impl StateMap {
     pub(crate) fn insert<T: Send + Sync + 'static>(&mut self, value: T) {
         self.values
-            .insert(std::any::TypeId::of::<T>(), Box::new(value));
+            .insert(std::any::TypeId::of::<T>(), Arc::new(value));
     }
 
     pub(crate) fn get<T: Send + Sync + 'static>(&self) -> Option<&T> {
         self.values
             .get(&std::any::TypeId::of::<T>())
             .and_then(|v| v.downcast_ref::<T>())
+    }
+
+    pub(crate) fn get_arc<T: Send + Sync + 'static>(&self) -> Option<Arc<T>> {
+        self.values
+            .get(&std::any::TypeId::of::<T>())
+            .and_then(|v| v.clone().downcast::<T>().ok())
     }
 }
 
@@ -202,6 +208,21 @@ impl Request {
         self.shutdown
             .clone()
             .unwrap_or_else(crate::shutdown::Shutdown::never)
+    }
+
+    /// An owned handle to the same state, for when the value must outlive a
+    /// borrow of the request (it is moved into middleware `next.run(req)`, a
+    /// spawned task, ...)
+    pub fn state_arc<T: Send + Sync + 'static>(&self) -> Result<Arc<T>> {
+        self.state
+            .as_ref()
+            .and_then(|s| s.get_arc::<T>())
+            .ok_or_else(|| {
+                Error::internal(format!(
+                    "State of type {} is not registered",
+                    std::any::type_name::<T>()
+                ))
+            })
     }
 
     /// Like [`Request::state`], `None` when the type is not registered
