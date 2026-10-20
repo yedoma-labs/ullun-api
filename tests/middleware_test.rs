@@ -399,3 +399,31 @@ mod compression_middleware {
         }
     }
 }
+
+#[tokio::test]
+async fn one_middleware_instance_can_serve_several_groups() {
+    use std::sync::Arc;
+    use std::time::Duration;
+    use ullun::rate_limit::RateLimiter;
+
+    // a single budget of 2 requests across both groups
+    let limiter = Arc::new(RateLimiter::new(2, Duration::from_secs(60)));
+    let (a, b) = (limiter.clone(), limiter);
+    let addr = spawn(
+        App::new()
+            .group("/a", move |g| {
+                g.middleware(a)
+                    .get("/x", |_req: Request| async { Ok(Response::text("a")) })
+            })
+            .group("/b", move |g| {
+                g.middleware(b)
+                    .get("/x", |_req: Request| async { Ok(Response::text("b")) })
+            }),
+    )
+    .await;
+
+    assert_eq!(send(addr, "GET", "/a/x").await.0, 200);
+    assert_eq!(send(addr, "GET", "/b/x").await.0, 200);
+    assert_eq!(send(addr, "GET", "/a/x").await.0, 429);
+    assert_eq!(send(addr, "GET", "/b/x").await.0, 429);
+}
