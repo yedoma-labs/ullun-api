@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1](https://github.com/yedoma-labs/ullun-api/compare/v0.2.0...v0.2.1) - 2026-10-20
+
+### Added
+
+- *(examples)* add scenario examples
+- *(app)* add App::serve for pre-bound listeners
+
+### Fixed
+
+- *(middleware)* run middleware for unmatched routes
+- *(static)* serve files via the matchit 0.9 catch-all route
+
+### Other
+
+- document scenario examples, measured benchmarks and release flow
+- lint, test and build gate with release-plz releases
+- *(bench)* add end-to-end HTTP and request/middleware benchmarks
+- *(deps)* update dependencies to latest versions
+- apply rustfmt
+- adds header image
+
 ## [0.2.0] - 2026-06-08
 
 ### Added
