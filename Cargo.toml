@@ -48,6 +48,10 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 name = "router_benchmark"
 harness = false
 
+[[bench]]
+name = "http_benchmark"
+harness = false
+
 [lib]
 name = "ullun"
 path = "src/lib.rs"
