@@ -42,14 +42,15 @@
 - Use SameSite cookie attribute
 - Validate Origin/Referer headers
 
-**Authentication/Authorization** - No built-in auth
-- Implement in middleware
-- Use established libraries (jsonwebtoken, bcrypt)
-- Never store passwords in plaintext
+**Authentication/Authorization** - Building blocks only
+- `jwt` feature: HS256 tokens and `JwtAuth` middleware (rejects `alg: none`, constant-time signature check, 32-byte minimum secret). Authorization (roles, ownership) stays in your handlers
+- Hash passwords with a dedicated crate (argon2, bcrypt); never store them in plaintext
 
-**Rate Limiting** - Not included in v0.1
-- Implement at reverse proxy (nginx, Caddy)
-- Or add custom middleware
+**Rate Limiting** - `RateLimiter` middleware (per instance, in memory)
+- Keyed by peer IP by default; `trust_forwarded_for()` only behind your own reverse proxy
+- Use the reverse proxy (nginx, Caddy) or a shared store for limits across instances
+
+**WebSockets** (`websocket` feature) - Cross-site origins are rejected by default (browsers do not apply the same-origin policy to WebSockets), messages are capped at 1 MiB. Authenticate connections in middleware or in the first message
 
 **File Uploads** - Not supported in v0.1
 - If added, validate file types
@@ -162,8 +163,8 @@ We will:
 
 ## Known Limitations
 
-1. **No built-in authentication** - Implement in middleware
-2. **No rate limiting** - Use reverse proxy or custom middleware
+1. **Authentication is opt-in** - Use `JwtAuth` (feature `jwt`) or your own middleware
+2. **Rate limiting is per instance** - See `ullun::rate_limit`; use a proxy or shared store for global limits
 3. **Request size limits configurable** - Default 10MB, configure with `max_body_size()` (v0.2.0+)
 4. **Basic CORS implementation** - Production should use more sophisticated origin checking
 5. **No built-in CSRF protection** - Must implement manually

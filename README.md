@@ -62,7 +62,12 @@ async fn main() {
 - **🎨 Ergonomic:** Result<T, E> maps to HTTP status codes automatically
 - **🍪 Cookie Support:** Parse and set HTTP cookies with ease
 - **📁 Static Files:** Serve static files from directories
-- **🎯 Route Groups:** Organize routes with common prefixes
+- **🎯 Route Groups:** Organize routes with common prefixes, optionally with group-level middleware
+- **📝 Forms:** `application/x-www-form-urlencoded` into typed structs
+- **🖼️ Templates:** Built-in dependency-free engine, or plug in your own via `TemplateEngine`
+- **🚦 Rate limiting:** In-memory middleware with `429` / `retry-after`
+- **📖 OpenAPI 3.1:** Document generated from your routes, optional Swagger UI
+- **🔐 JWT** (`jwt` feature), **🗜️ gzip** (`compression` feature), **🔌 WebSockets** (`websocket` feature)
 
 ## ⚠️ Production Readiness
 
@@ -76,7 +81,7 @@ async fn main() {
 
 ### ⚠️ User Must Implement
 - **Authentication/Authorization** - Use middleware (see `examples/todo_api.rs`)
-- **Rate Limiting** - Use reverse proxy (nginx/Caddy) or custom middleware
+- **Rate Limiting** - `RateLimiter` middleware per instance; use a reverse proxy (nginx/Caddy) or a shared store for a global limit
 - **TLS/HTTPS** - Use reverse proxy (never expose raw HTTP in production)
 - **Input Validation** - Validate business logic (framework validates types)
 - **SQL Injection Prevention** - Use parameterized queries (sqlx, diesel)
@@ -102,6 +107,19 @@ ullun-api = "0.2"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+```
+
+Optional features (everything else is always on):
+
+| Feature | Adds | Extra dependencies |
+|---------|------|--------------------|
+| `jwt` | `ullun::jwt` - HS256 tokens, `JwtAuth` middleware | `hmac`, `sha2`, `base64` |
+| `compression` | `ullun::compression::Compression` - gzip middleware | `flate2` |
+| `websocket` | `App::ws`, `ullun::websocket` | `tokio-tungstenite`, `futures-util` |
+| `full` | all of the above | |
+
+```toml
+ullun-api = { version = "0.2", features = ["jwt", "websocket"] }
 ```
 
 ## Quick Start
@@ -245,6 +263,110 @@ App::new()
     .await?;
 ```
 
+### Group Middleware
+
+```rust
+App::new()
+    .middleware(logger)                       // every request, including 404s
+    .group("/admin", |g| {
+        g.middleware(require_admin)           // only the routes of this group
+            .get("/dashboard", dashboard)
+    })
+```
+
+### Forms
+
+```rust
+#[derive(Deserialize)]
+struct Signup { name: String, age: u8, newsletter: Option<bool> }
+
+async fn signup(req: Request) -> Result<Response> {
+    let form: Signup = req.form()?;           // 415 for other content types, 400 for bad values
+    // req.form_data()? gives decoded key/value access instead
+    Ok(Response::redirect("/thanks"))         // 303 See Other
+}
+```
+
+`req.query.parse::<T>()` converts numbers, booleans and options the same way.
+
+### Templates
+
+```rust
+let mut templates = Templates::new();         // or Templates::from_dir("templates")?
+templates.add("hello.html", "Hello {{name}}!{{#each tags}} #{{this}}{{/each}}")?;
+
+async fn hello(templates: Arc<Templates>) -> Result<Response> {
+    Ok(Response::html(templates.render("hello.html", &json!({ "name": "<Ann>", "tags": ["a", "b"] }))?))
+}
+```
+
+Variables are HTML-escaped (`{{{raw}}}` is not), with `{{#if}}` / `{{else}}` / `{{#unless}}`, `{{#each}}`, `{{> partial}}` and `{{! comments }}`. Using minijinja, tera or handlebars instead? Implement `TemplateEngine` (one method) and keep the same call sites.
+
+### Rate Limiting
+
+```rust
+use ullun::rate_limit::RateLimiter;
+
+App::new()
+    .middleware(RateLimiter::new(100, Duration::from_secs(60)))   // per client IP
+    // .middleware(RateLimiter::new(5, Duration::from_secs(10)).key_by(|req| api_key(req)))
+```
+
+Answers `429` with `retry-after` and `x-ratelimit-*` headers. Behind a reverse proxy use `.trust_forwarded_for()`; never without one, because clients could pick their own bucket.
+
+### OpenAPI
+
+```rust
+use ullun::openapi::{schema, OpenApiInfo, Operation};
+
+App::new()
+    .get_with_params("/users/{id}", get_user)
+    .doc("GET", "/users/{id}",
+        Operation::new("Fetch a user").tag("users")
+            .path_param("id", schema::integer(), "User id")
+            .response_json(200, "The user", schema::object([("id", schema::integer())], ["id"]))
+            .error_response(404, "No such user"))
+    .openapi(OpenApiInfo::new("Users API", "1.0.0").swagger_ui("/docs"))   // /openapi.json + /docs
+```
+
+All routes are listed automatically, `.doc` adds the details. Swagger UI is opt-in because it loads a script from unpkg (pinned, with integrity hashes).
+
+### JWT (feature `jwt`)
+
+```rust
+let token = jwt::encode(&json!({ "sub": "ann", "exp": jwt::expires_in(900) }), secret)?;
+
+App::new().group("/api", |g| {
+    g.middleware(JwtAuth::new(secret))        // 401 without a valid bearer token
+        .get("/me", |req: Request| async move {
+            let claims = req.extensions.get::<Claims>().unwrap();
+            Ok(Response::json(&claims.0))
+        })
+})
+```
+
+HS256 only (`alg: none` and friends are rejected), constant-time verification, `exp`/`nbf`/issuer/audience checks, secrets of at least 32 bytes.
+
+### Compression (feature `compression`)
+
+```rust
+App::new().middleware(Compression::new())     // gzip text/JSON/XML/JS bodies >= 1 KiB when accepted
+```
+
+### WebSockets (feature `websocket`)
+
+```rust
+App::new().ws("/chat/{room}", |req: Request, mut socket: WebSocket| async move {
+    while let Some(Ok(msg)) = socket.recv().await {
+        if let Message::Text(t) = msg {
+            let _ = socket.send_text(t).await;
+        }
+    }
+})
+```
+
+Cross-site `Origin`s are rejected unless listed in `WsOptions::allowed_origins` (`App::ws_with`), messages are capped at 1 MiB.
+
 ## API Reference
 
 ### App
@@ -340,10 +462,13 @@ Scenarios (each is a self-contained deployment shape):
 | Scenario | Example | Shows |
 |----------|---------|-------|
 | Containerised microservice | [`microservice.rs`](examples/microservice.rs) | `/healthz` + `/readyz` probes, request ids, Prometheus metrics, `PORT` config, graceful shutdown |
-| Public API for third parties | [`public_api.rs`](examples/public_api.rs) | API keys, per-key rate limiting with `retry-after`, CORS preflight, versioned group, pagination |
+| Public API for third parties | [`public_api.rs`](examples/public_api.rs) | API keys, per-key `RateLimiter`, CORS preflight, versioned group, typed query pagination, OpenAPI |
 | SPA + backend in one binary | [`spa_backend.rs`](examples/spa_backend.rs) | Static frontend at `/`, JSON API under `/api`, security headers |
 | Webhook receiver | [`webhook_receiver.rs`](examples/webhook_receiver.rs) | Constant-time token check, body limit, idempotency, `202` + background worker |
 | Server-rendered HTML | [`html_forms.rs`](examples/html_forms.rs) | Form posts, cookie sessions, flash messages, Post/Redirect/Get, HTML escaping |
+| Token-secured API | [`jwt_auth.rs`](examples/jwt_auth.rs) (`jwt`) | Login, bearer-protected group, roles, OpenAPI with security scheme and Swagger UI |
+| Real-time app | [`realtime_chat.rs`](examples/realtime_chat.rs) (`websocket`) | Broadcast chat, origin check, browser client |
+| Templated site | [`templates_site.rs`](examples/templates_site.rs) (`compression`) | Template engine, validated forms, gzip, JSON twin of the page |
 
 Run examples:
 
@@ -351,6 +476,7 @@ Run examples:
 cargo run --example hello_world
 cargo run --example microservice
 PORT=8080 cargo run --example public_api   # scenario examples read PORT (default 3000)
+cargo run --example jwt_auth --features jwt   # feature-gated examples need their feature
 ```
 
 Test the API:
@@ -416,14 +542,15 @@ See [SECURITY.md](SECURITY.md) for comprehensive guidelines and best practices.
 ### Done
 - [x] Route groups, cookies, static file serving, body size limits (0.2)
 - [x] Scenario examples, end-to-end HTTP benchmarks
+- [x] Group-level middleware, form parsing, template engine integration
+- [x] Rate limiting, JWT, gzip compression, WebSockets, OpenAPI generation
 
-### Next
-- [ ] Group-level middleware (`RouteGroup::middleware` is accepted but ignored today)
-- [ ] OpenAPI/Swagger generation
-- [ ] WebSocket support
-- [ ] Form data parsing helpers
-- [ ] Rate limiting, compression and JWT helpers (patterns in `examples/public_api.rs`)
-- [ ] Template engine integration
+### Ideas
+- [ ] OpenAPI schemas derived from types (needs a derive macro or `schemars`)
+- [ ] `multipart/form-data` uploads
+- [ ] `HEAD` / `OPTIONS` handling in the router
+- [ ] Shared rate-limit stores (Redis) behind a trait
+- [ ] More JWT algorithms (RS256/ES256) and JWKS
 
 ## CI/CD
 

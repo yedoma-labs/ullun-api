@@ -89,7 +89,7 @@ impl App {
 
     /// Publish an OpenAPI 3.1 document of all routes (and optionally Swagger UI)
     ///
-    /// See the [`openapi`](crate::openapi) module.
+    /// See the [`openapi`] module.
     pub fn openapi(mut self, info: OpenApiInfo) -> Self {
         self.openapi = Some(info);
         self

@@ -15,6 +15,7 @@ cargo test --test integration_test
 ### All Tests
 ```bash
 cargo test --all
+cargo test --all-features    # jwt, compression and websocket tests
 ```
 
 ### Doc Tests
@@ -44,8 +45,11 @@ View results in `target/criterion/report/index.html`
 tests/
 ├── integration_test.rs   # Unit-level integration tests
 ├── e2e_test.rs           # End-to-end HTTP tests (fixed ports)
-├── middleware_test.rs    # Middleware order, CORS preflight, 404 wrapping (ephemeral port)
+├── middleware_test.rs    # Middleware order, groups, CORS preflight, 404 wrapping, rate limiter,
+│                         #   extensions; JWT and gzip middleware (features jwt, compression)
 ├── static_files_test.rs  # Static serving, index files, traversal (ephemeral port)
+├── openapi_test.rs       # Generated OpenAPI document and Swagger page
+├── websocket_test.rs     # Handshake, echo, origin check, size limit (feature websocket)
 └── pentest.rs            # Security regression tests
 
 benches/
