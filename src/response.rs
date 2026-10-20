@@ -78,6 +78,25 @@ impl Response {
         (crate::stream::BodySender::new(tx), res)
     }
 
+    /// The response a `HEAD` request gets: same status and headers, no body.
+    /// `content-length` is set from the buffered body unless already present.
+    pub(crate) fn into_head(mut self) -> Self {
+        let bodiless = self.status.is_informational()
+            || self.status == StatusCode::NO_CONTENT
+            || self.status == StatusCode::NOT_MODIFIED;
+        if self.stream.is_none()
+            && !bodiless
+            && !self.headers.contains_key(http::header::CONTENT_LENGTH)
+        {
+            if let Ok(len) = http::HeaderValue::from_str(&self.body.len().to_string()) {
+                self.headers.insert(http::header::CONTENT_LENGTH, len);
+            }
+        }
+        self.body = Bytes::new();
+        self.stream = None;
+        self
+    }
+
     /// Whether the body is streamed instead of held in `body`
     pub fn is_streaming(&self) -> bool {
         self.stream.is_some()

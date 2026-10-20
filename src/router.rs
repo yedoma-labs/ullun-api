@@ -59,13 +59,39 @@ impl Router {
         Ok(())
     }
 
+    /// Methods with a route for `path`, in a fixed order, including the
+    /// implicit `HEAD` (next to `GET`) and `OPTIONS`. Empty when the path is unknown.
+    pub fn allowed_methods(&self, path: &str) -> Vec<&'static str> {
+        let tables: [(&'static str, &matchit::Router<DynHandler>); 5] = [
+            ("GET", &self.get),
+            ("POST", &self.post),
+            ("PUT", &self.put),
+            ("DELETE", &self.delete),
+            ("PATCH", &self.patch),
+        ];
+        let mut allowed = Vec::new();
+        for (name, table) in tables {
+            if table.at(path).is_ok() {
+                allowed.push(name);
+                if name == "GET" {
+                    allowed.push("HEAD");
+                }
+            }
+        }
+        if !allowed.is_empty() {
+            allowed.push("OPTIONS");
+        }
+        allowed
+    }
+
     pub(crate) fn registered(&self) -> &[RouteInfo] {
         &self.registered
     }
 
     pub fn match_route(&self, method: &str, path: &str) -> Result<(DynHandler, Params)> {
         let router = match method.to_uppercase().as_str() {
-            "GET" => &self.get,
+            // HEAD is answered by the GET handler, the body is dropped afterwards
+            "GET" | "HEAD" => &self.get,
             "POST" => &self.post,
             "PUT" => &self.put,
             "DELETE" => &self.delete,
@@ -114,6 +140,29 @@ mod tests {
 
         let (_, params) = router.match_route("GET", "/hello/world").unwrap();
         assert_eq!(params.get("name").unwrap(), "world");
+    }
+
+    #[test]
+    fn allowed_methods_lists_what_the_path_supports() {
+        let mut router = Router::new();
+        let handler = Arc::new(TestHandler) as DynHandler;
+        router
+            .insert("GET", "/users/{id}", handler.clone())
+            .unwrap();
+        router
+            .insert("DELETE", "/users/{id}", handler.clone())
+            .unwrap();
+        router.insert("POST", "/users", handler.clone()).unwrap();
+
+        assert_eq!(
+            router.allowed_methods("/users/7"),
+            ["GET", "HEAD", "DELETE", "OPTIONS"]
+        );
+        assert_eq!(router.allowed_methods("/users"), ["POST", "OPTIONS"]);
+        assert!(router.allowed_methods("/nothing").is_empty());
+        // HEAD resolves like GET
+        assert!(router.match_route("HEAD", "/users/7").is_ok());
+        assert!(router.match_route("HEAD", "/users").is_err());
     }
 
     #[test]
