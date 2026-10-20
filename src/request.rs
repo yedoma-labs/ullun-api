@@ -33,6 +33,15 @@ impl Params {
     pub fn get_opt(&self, key: &str) -> Option<&str> {
         self.inner.get(key).map(|s| s.as_str())
     }
+
+    /// Parse a path parameter into any `FromStr` type, e.g. `params.parse::<u64>("id")?`
+    ///
+    /// Answers `400` naming the parameter when it does not parse.
+    pub fn parse<T: std::str::FromStr>(&self, key: &str) -> Result<T> {
+        self.get(key)?
+            .parse()
+            .map_err(|_| Error::bad_request(format!("Invalid path parameter '{}'", key)))
+    }
 }
 
 impl Default for Params {
@@ -268,6 +277,22 @@ mod tests {
         name: String,
         age: u8,
         newsletter: Option<bool>,
+    }
+
+    #[test]
+    fn params_parse_typed_values() {
+        let mut p = Params::new();
+        p.insert("id".into(), "42".into());
+        p.insert("name".into(), "x".into());
+        assert_eq!(p.parse::<u64>("id").unwrap(), 42);
+        assert_eq!(p.parse::<String>("name").unwrap(), "x");
+        let bad = p.parse::<u64>("name").unwrap_err();
+        assert_eq!(bad.status_code(), 400);
+        assert_eq!(bad.message(), "Invalid path parameter 'name'");
+        assert_eq!(p.parse::<u64>("missing").unwrap_err().status_code(), 400);
+        assert!(p.parse::<u8>("id").is_ok());
+        p.insert("big".into(), "300".into());
+        assert!(p.parse::<u8>("big").is_err());
     }
 
     #[test]
