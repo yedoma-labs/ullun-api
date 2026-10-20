@@ -66,6 +66,7 @@ async fn main() {
 - **📝 Forms:** `application/x-www-form-urlencoded` into typed structs
 - **🖼️ Templates:** Built-in dependency-free engine, or plug in your own via `TemplateEngine`
 - **🚦 Rate limiting:** In-memory middleware with `429` / `retry-after`
+- **🔁 Idempotency keys:** `Idempotency` middleware replays the stored response of a retried `POST` (409 while running, 422 on payload mismatch, per-caller scope)
 - **🛡️ Resilience:** header-read timeout (slowloris), connection caps (total and per IP), `Timeout` (504) and `ConcurrencyLimit` load shedding (503 + `Retry-After`)
 - **📖 OpenAPI 3.1:** Document generated from your routes, optional Swagger UI
 - **🧰 State & security helpers:** `App::state` / `Request::state`, CSPRNG tokens, constant-time comparison
@@ -691,6 +692,7 @@ Complete services that run as they are and are covered by integration tests (`te
 
 | App | Run | What it demonstrates |
 |-----|-----|----------------------|
+| [`orders`](examples/orders) | `cargo run --example orders` | Checkout API for a browser shop: CORS with credentials, security headers, required idempotency keys (retries place one order), no overselling, timeout and load shedding |
 | [`shortener`](examples/shortener) | `cargo run --example shortener` | URL shortener: API-key management API, public redirects, click counting, expiry, per-key rate limit, JSON file persistence, OpenAPI |
 | [`taskboard`](examples/taskboard) (`jwt`) | `DEV=1 cargo run --example taskboard --features jwt` | REST API: registration/login (argon2 + JWT), per-user projects and tasks, 422 field errors, filter/sort/pagination, ETag + If-Match, login throttling, OpenAPI + Swagger UI |
 | [`statuspage`](examples/statuspage) | `DEV=1 cargo run --example statuspage` | Uptime monitor: background scheduler, HTTP/TCP checks with SSRF protection, public status page with live Server-Sent Events, admin API, graceful SIGTERM shutdown |
