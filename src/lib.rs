@@ -46,6 +46,7 @@ pub mod hub;
 pub mod jobs;
 #[cfg(feature = "jwt")]
 pub mod jwt;
+pub mod limits;
 pub mod middleware;
 pub mod multipart;
 pub mod observability;
