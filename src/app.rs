@@ -30,6 +30,17 @@ pub struct App {
     background: Vec<BackgroundTask>,
     shutdown_grace: Duration,
     body_limits: Vec<(String, Option<usize>)>,
+    #[cfg(feature = "tls")]
+    tls: Option<crate::tls::TlsConfig>,
+    #[cfg(feature = "tls")]
+    tls_reload: Option<Duration>,
+}
+
+/// Facts about one connection that every request on it inherits
+struct ConnInfo {
+    peer: SocketAddr,
+    secure: bool,
+    client_cert: Option<Vec<u8>>,
 }
 
 type BackgroundTask = Box<dyn FnOnce(Context) -> BoxFuture<'static, ()> + Send>;
@@ -67,6 +78,10 @@ impl App {
             background: Vec::new(),
             shutdown_grace: Duration::from_secs(10),
             body_limits: Vec::new(),
+            #[cfg(feature = "tls")]
+            tls: None,
+            #[cfg(feature = "tls")]
+            tls_reload: None,
         }
     }
 
@@ -141,6 +156,23 @@ impl App {
     {
         self.background
             .push(Box::new(move |ctx| Box::pin(task(ctx))));
+        self
+    }
+
+    /// Serve HTTPS instead of HTTP (feature `tls`), see [`crate::tls`]
+    #[cfg(feature = "tls")]
+    pub fn tls(mut self, config: crate::tls::TlsConfig) -> Self {
+        self.tls = Some(config);
+        self
+    }
+
+    /// Check the certificate files for changes this often and switch to renewed
+    /// certificates without a restart (feature `tls`; needs
+    /// `TlsConfig::from_pem_files`). A failed reload is logged and the previous
+    /// certificate stays in use.
+    #[cfg(feature = "tls")]
+    pub fn tls_reload_every(mut self, interval: Duration) -> Self {
+        self.tls_reload = Some(interval);
         self
     }
 
@@ -377,7 +409,11 @@ impl App {
             .await
             .map_err(|e| Error::internal(format!("Failed to bind: {}", e)))?;
 
-        println!("🚀 ullun-api listening on http://{}", addr);
+        #[cfg(feature = "tls")]
+        let scheme = if self.tls.is_some() { "https" } else { "http" };
+        #[cfg(not(feature = "tls"))]
+        let scheme = "http";
+        println!("🚀 ullun-api listening on {}://{}", scheme, addr);
 
         let result = self
             .serve_with_shutdown(listener, async {
@@ -414,17 +450,39 @@ impl App {
         self = self.finalize();
         let grace = self.shutdown_grace;
         let background = std::mem::take(&mut self.background);
+        #[cfg(feature = "tls")]
+        let tls = self.tls.take();
+        #[cfg(feature = "tls")]
+        let tls_reload = self.tls_reload;
         let (trigger, rx) = tokio::sync::watch::channel(false);
         let shutdown = Shutdown::new(rx);
         let shared = Arc::new(self.into_shared(shutdown.clone()));
 
-        let tasks: Vec<_> = background
+        #[allow(unused_mut)]
+        let mut tasks: Vec<_> = background
             .into_iter()
             .map(|task| {
                 let ctx = Context::new(shared.state.clone(), shutdown.clone());
                 tokio::spawn(task(ctx))
             })
             .collect();
+
+        #[cfg(feature = "tls")]
+        if let (Some(config), Some(every)) = (tls.clone(), tls_reload) {
+            let shutdown = shutdown.clone();
+            tasks.push(tokio::spawn(async move {
+                while shutdown.sleep(every).await {
+                    match config.reload() {
+                        Ok(true) => println!("🔐 TLS certificate reloaded"),
+                        Ok(false) => {}
+                        Err(e) => eprintln!(
+                            "TLS certificate reload failed, keeping the previous one: {}",
+                            e.message()
+                        ),
+                    }
+                }
+            }));
+        }
 
         // every connection holds a clone; the channel closes when all are done
         let (done_tx, mut done_rx) = tokio::sync::mpsc::channel::<()>(1);
@@ -434,9 +492,24 @@ impl App {
                 _ = &mut signal => break,
                 accepted = listener.accept() => match accepted {
                     Ok((stream, peer)) => {
+                        #[cfg(feature = "tls")]
+                        if let Some(config) = tls.clone() {
+                            let (shared, shutdown, done) = (shared.clone(), shutdown.clone(), done_tx.clone());
+                            tokio::spawn(async move {
+                                // the handshake runs here, not in the accept loop: a slow
+                                // client must not hold up everybody else
+                                // scanners, plain HTTP on the TLS port and aborted handshakes just end here
+                                if let Ok((tls_stream, client_cert)) = config.accept(stream).await {
+                                    let info = ConnInfo { peer, secure: true, client_cert };
+                                    serve_connection(tls_stream, info, shared, shutdown, done).await;
+                                }
+                            });
+                            continue;
+                        }
+                        let info = ConnInfo { peer, secure: false, client_cert: None };
                         tokio::spawn(serve_connection(
                             stream,
-                            peer,
+                            info,
                             shared.clone(),
                             shutdown.clone(),
                             done_tx.clone(),
@@ -524,17 +597,20 @@ impl App {
 }
 
 /// One connection, until it closes or shutdown drains it
-async fn serve_connection(
-    stream: tokio::net::TcpStream,
-    peer: SocketAddr,
+async fn serve_connection<S>(
+    stream: S,
+    info: ConnInfo,
     shared: Arc<Shared>,
     shutdown: Shutdown,
     _done: tokio::sync::mpsc::Sender<()>,
-) {
+) where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
     let io = TokioIo::new(stream);
+    let info = Arc::new(info);
     let service = service_fn(|req| {
-        let shared = shared.clone();
-        async move { Ok::<_, Infallible>(handle_request(req, peer, shared).await) }
+        let (shared, info) = (shared.clone(), info.clone());
+        async move { Ok::<_, Infallible>(handle_request(req, &info, shared).await) }
     });
     let conn = http1::Builder::new()
         .serve_connection(io, service)
@@ -711,7 +787,7 @@ impl RouteGroup {
 
 async fn handle_request(
     req: hyper::Request<hyper::body::Incoming>,
-    peer: SocketAddr,
+    conn: &ConnInfo,
     shared: Arc<Shared>,
 ) -> hyper::Response<crate::response::HyperBody> {
     let Shared {
@@ -745,7 +821,13 @@ async fn handle_request(
 
     let mut request = Request::new(parts.method, parts.uri, parts.headers, body_bytes);
     request.extensions = parts.extensions;
-    request.remote_addr = Some(peer);
+    request.remote_addr = Some(conn.peer);
+    request.secure = conn.secure;
+    if let Some(cert) = &conn.client_cert {
+        request
+            .extensions
+            .insert(crate::request::ClientCertificate(cert.clone()));
+    }
     request.state = Some(state.clone());
     request.shutdown = Some(shutdown.clone());
 

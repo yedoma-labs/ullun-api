@@ -112,6 +112,10 @@ impl Default for Query {
     }
 }
 
+/// The verified client certificate of a TLS connection (DER)
+#[derive(Debug, Clone)]
+pub struct ClientCertificate(pub Vec<u8>);
+
 /// Type-keyed storage for shared application state
 #[derive(Default)]
 pub(crate) struct StateMap {
@@ -154,6 +158,9 @@ pub struct Request {
     /// matched. Use it, not the raw path, as a metrics label or log field: it
     /// stays the same for every id.
     pub matched_path: Option<std::sync::Arc<str>>,
+    /// The request arrived over TLS (`App::tls`). Behind a TLS-terminating
+    /// proxy this is `false`; see `secure::RequireHttps::trust_forwarded_proto`.
+    pub secure: bool,
     pub(crate) state: Option<std::sync::Arc<StateMap>>,
     pub(crate) shutdown: Option<crate::shutdown::Shutdown>,
     cookies: OnceLock<Cookies>,
@@ -181,10 +188,27 @@ impl Request {
             extensions: http::Extensions::new(),
             remote_addr: None,
             matched_path: None,
+            secure: false,
             state: None,
             shutdown: None,
             cookies: OnceLock::new(),
         }
+    }
+
+    /// True when the request came in over TLS
+    pub fn is_secure(&self) -> bool {
+        self.secure
+    }
+
+    /// DER of the leaf certificate the client presented during the TLS
+    /// handshake (mutual TLS, feature `tls`); `None` for anonymous clients and
+    /// plain HTTP. The certificate has already been verified against the CAs
+    /// given to `TlsConfig::client_auth`; check *which* verified client it is
+    /// (fingerprint or subject) before authorizing anything.
+    pub fn client_certificate(&self) -> Option<&[u8]> {
+        self.extensions
+            .get::<ClientCertificate>()
+            .map(|c| c.0.as_slice())
     }
 
     /// Shared application state registered with `App::state`
