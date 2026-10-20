@@ -2,6 +2,7 @@
 
 use crate::error::{Error, Result};
 use crate::handler::DynHandler;
+use crate::openapi::{RouteInfo, RouteKind};
 use crate::request::Params;
 
 /// HTTP method routing
@@ -12,6 +13,7 @@ pub struct Router {
     put: matchit::Router<DynHandler>,
     delete: matchit::Router<DynHandler>,
     patch: matchit::Router<DynHandler>,
+    registered: Vec<RouteInfo>,
 }
 
 impl Router {
@@ -20,7 +22,18 @@ impl Router {
     }
 
     pub fn insert(&mut self, method: &str, path: &str, handler: DynHandler) -> Result<()> {
-        let router = match method.to_uppercase().as_str() {
+        self.insert_as(RouteKind::Http, method, path, handler)
+    }
+
+    pub(crate) fn insert_as(
+        &mut self,
+        kind: RouteKind,
+        method: &str,
+        path: &str,
+        handler: DynHandler,
+    ) -> Result<()> {
+        let method = method.to_uppercase();
+        let router = match method.as_str() {
             "GET" => &mut self.get,
             "POST" => &mut self.post,
             "PUT" => &mut self.put,
@@ -38,7 +51,16 @@ impl Router {
             .insert(path, handler)
             .map_err(|e| Error::internal(format!("Failed to insert route: {}", e)))?;
 
+        self.registered.push(RouteInfo {
+            method,
+            path: path.to_string(),
+            kind,
+        });
         Ok(())
+    }
+
+    pub(crate) fn registered(&self) -> &[RouteInfo] {
+        &self.registered
     }
 
     pub fn match_route(&self, method: &str, path: &str) -> Result<(DynHandler, Params)> {
