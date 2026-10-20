@@ -53,6 +53,8 @@ tests/
 ├── example_shortener.rs  # Real-world example apps, run over real HTTP
 ├── example_pastebin.rs   #   (the app modules are included with #[path])
 ├── example_taskboard.rs  #   (feature jwt)
+├── tls_test.rs           # HTTPS, reload, mutual TLS, redirect/HSTS (feature tls; rcgen certificates)
+├── example_secure_api.rs #   (mutual TLS, fingerprint allow-list)
 ├── example_webhooks.rs   #   (real receivers: retries, signatures, dead letters, restart)
 ├── example_chat.rs       #   (real WebSocket clients, features websocket + jwt)
 ├── example_gateway.rs    #   (real upstream servers, failover, streaming relay)
