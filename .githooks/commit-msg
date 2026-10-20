@@ -1,0 +1,16 @@
+#!/bin/sh
+# Enforce Conventional Commits locally. Enable with:
+#   git config core.hooksPath .githooks
+first_line=$(head -n 1 "$1")
+pattern='^(feat|fix|docs|doc|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?!?: .+'
+
+case "$first_line" in
+  Merge\ *|Revert\ *|fixup!\ *|squash!\ *) exit 0 ;;
+esac
+
+if ! echo "$first_line" | grep -Eq "$pattern"; then
+  echo "error: commit message must follow Conventional Commits:" >&2
+  echo "  <type>(<scope>)?: <description>   e.g. 'feat(router): add OPTIONS support'" >&2
+  echo "  types: feat fix docs style refactor perf test build ci chore revert" >&2
+  exit 1
+fi
