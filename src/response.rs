@@ -34,6 +34,11 @@ impl Response {
         Self::new(StatusCode::OK)
     }
 
+    pub fn with_status(mut self, status: StatusCode) -> Self {
+        self.status = status;
+        self
+    }
+
     pub fn with_body(mut self, body: impl Into<Bytes>) -> Self {
         self.body = body.into();
         self
@@ -93,8 +98,7 @@ impl Response {
     }
 
     pub fn from_error(error: Error) -> Self {
-        let status =
-            StatusCode::from_u16(error.status_code()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        let status = error.status();
         let body = serde_json::json!({
             "error": error.message(),
             "status": error.status_code(),
