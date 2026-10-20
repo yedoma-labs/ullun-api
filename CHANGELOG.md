@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2](https://github.com/yedoma-labs/ullun-api/compare/v0.2.1...v0.2.2) - 2026-10-20
+
+### Added
+
+- *(examples)* add jwt, websocket and template scenarios
+- *(openapi)* generate an OpenAPI 3.1 document from registered routes
+- *(websocket)* add WebSocket endpoints behind the websocket feature
+- *(compression)* add gzip compression middleware behind the compression feature
+- *(jwt)* add HS256 JWT helpers behind the jwt feature
+- *(rate-limit)* add rate limiting middleware
+- *(template)* add template engine integration
+- *(request)* parse urlencoded form bodies
+- *(request)* expose extensions and peer address
+- *(app)* support middleware on route groups
+
+### Other
+
+- document the new features and update the roadmap
+
 ## [0.2.1](https://github.com/yedoma-labs/ullun-api/compare/v0.2.0...v0.2.1) - 2026-10-20
 
 ### Added
