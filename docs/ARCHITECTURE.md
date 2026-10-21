@@ -37,7 +37,7 @@ Modules above the core never reach into `app.rs`; they talk to the framework onl
 | Core | `app` (builder, accept loop, connection driving), `router` (matchit per method), `handler`, `middleware` (`Middleware`, `Next`, `Layered`), `request`, `response`, `error`, `cookies`, `shutdown` |
 | Request bodies | `upload` (streaming), `multipart`, `validate` (field errors → 422) |
 | Responses | `sse`, `stream`, `files` (ranges, conditional), `static_files` (precompressed, SPA), `template` |
-| Security | `cors`, `security_headers`, `session`, `csrf`, `jwt`, `signed_cookies`, `security` (tokens, SSRF checks), `secure` (HTTPS policy), `tls`, `rate_limit` |
+| Security | `cors`, `security_headers`, `session`, `csrf`, `jwt`, `auth`, `signed_cookies`, `proxy`, `security` (tokens, SSRF checks), `secure` (HTTPS policy), `tls`, `rate_limit` |
 | Reliability | `limits` (timeouts, concurrency, connection caps), `health`, `idempotency`, `cache`, `jobs`, `hub`, `compression`, `conditional` |
 | Observability | `observability` (request id, access log, metrics), `trace` (W3C trace context) |
 | API contract | `openapi`, `problem` (RFC 9457), `negotiate` |
