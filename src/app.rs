@@ -36,6 +36,7 @@ pub struct App {
     header_read_timeout: Option<Duration>,
     max_connections: Option<usize>,
     max_connections_per_ip: Option<usize>,
+    h2c: bool,
     trusted_proxies: Option<Arc<crate::proxy::TrustedProxies>>,
     fallback: Option<DynHandler>,
     catch_panics: bool,
@@ -97,6 +98,7 @@ impl App {
             header_read_timeout: Some(Duration::from_secs(30)),
             max_connections: None,
             max_connections_per_ip: None,
+            h2c: false,
             trusted_proxies: None,
             fallback: None,
             catch_panics: true,
@@ -204,6 +206,17 @@ impl App {
     /// trickle bytes to hold connections open.
     pub fn header_read_timeout(mut self, timeout: impl Into<Option<Duration>>) -> Self {
         self.header_read_timeout = timeout.into();
+        self
+    }
+
+    /// Accept HTTP/2 with prior knowledge ("h2c") on plain connections. The
+    /// first bytes of each connection are checked for the HTTP/2 preface;
+    /// HTTP/1.1 clients on the same port are unaffected. Meant for services
+    /// behind a gRPC-style proxy or load balancer that speaks h2c, on TLS the
+    /// protocol is negotiated through ALPN anyway. The HTTP/1.1 `Upgrade: h2c`
+    /// handshake is deprecated (RFC 9113) and not supported.
+    pub fn h2c(mut self, enabled: bool) -> Self {
+        self.h2c = enabled;
         self
     }
 
@@ -575,6 +588,7 @@ impl App {
         let tls = self.tls.take();
         #[cfg(feature = "tls")]
         let tls_reload = self.tls_reload;
+        let h2c = self.h2c;
         let conn_limits = ConnLimits::new(self.max_connections, self.max_connections_per_ip);
         let (trigger, rx) = tokio::sync::watch::channel(false);
         let (drain_tx, drain_rx) = tokio::sync::watch::channel(false);
@@ -643,15 +657,11 @@ impl App {
                             continue;
                         }
                         let info = ConnInfo { peer, secure: false, client_cert: None };
-                        tokio::spawn(serve_connection(
-                            stream,
-                            info,
-                            shared.clone(),
-                            shutdown.clone(),
-                            done_tx.clone(),
-                            guard,
-                            false,
-                        ));
+                        let (shared, shutdown, done) = (shared.clone(), shutdown.clone(), done_tx.clone());
+                        tokio::spawn(async move {
+                            let h2 = h2c && is_h2c(&stream).await;
+                            serve_connection(stream, info, shared, shutdown, done, guard, h2).await;
+                        });
                     }
                     Err(e) => {
                         // typically out of file descriptors: back off instead of dying
@@ -748,6 +758,29 @@ impl App {
     }
 }
 
+const H2_PREFACE: &[u8; 24] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+
+/// Whether the client opens with the HTTP/2 connection preface. Looks at the
+/// bytes without consuming them; an HTTP/1.1 request line differs from the
+/// first byte on, so ordinary clients are decided immediately.
+async fn is_h2c(stream: &tokio::net::TcpStream) -> bool {
+    let sniff = async {
+        let mut buf = [0u8; 24];
+        loop {
+            match stream.peek(&mut buf).await {
+                Ok(0) | Err(_) => return false,
+                Ok(n) if buf[..n] != H2_PREFACE[..n] => return false,
+                Ok(24) => return true,
+                // a prefix of the preface so far: wait for the rest
+                Ok(_) => tokio::time::sleep(Duration::from_millis(5)).await,
+            }
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(10), sniff)
+        .await
+        .unwrap_or(false)
+}
+
 /// One connection, until it closes or shutdown drains it
 async fn serve_connection<S>(
     stream: S,
@@ -768,7 +801,7 @@ async fn serve_connection<S>(
     });
 
     if h2 {
-        // negotiated through ALPN on a TLS connection
+        // negotiated through ALPN on TLS, or the preface on a plain connection
         let conn = http2::Builder::new(TokioExecutor::new())
             .timer(TokioTimer::new())
             .max_concurrent_streams(128)

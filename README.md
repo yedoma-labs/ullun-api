@@ -821,6 +821,7 @@ See [SECURITY.md](SECURITY.md) for comprehensive guidelines and best practices.
 - [x] TLS with reload and client certificates, HTTP/2 over ALPN, WebSockets, SSE, streaming bodies
 - [x] Health probes, graceful shutdown with drain delay, connection and concurrency limits, response cache
 - [x] Request ids, access log, metrics, W3C trace context, outbound HTTP client, in-process `TestClient`
+- [x] Cleartext HTTP/2 with prior knowledge (`App::h2c`)
 - [x] RS256/ES256 JWTs and JWKS (`jwt-asymmetric` feature)
 - [x] Encrypted ("private") cookies (`encryption` feature)
 - [x] Portable benchmark against axum and actix-web (`scripts/bench.sh`)
@@ -828,7 +829,7 @@ See [SECURITY.md](SECURITY.md) for comprehensive guidelines and best practices.
 ### Ideas
 - [ ] OpenAPI schemas derived from types (needs a derive macro or `schemars`)
 - [ ] Shared stores (Redis, SQL) for sessions, rate limits and idempotency keys behind the existing traits
-- [ ] Cleartext HTTP/2 (h2c) and HTTP/2 in the outbound client
+- [ ] HTTP/2 in the outbound client
 
 ## CI/CD
 
