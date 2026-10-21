@@ -32,6 +32,7 @@ pub struct App {
     shutdown_grace: Duration,
     shutdown_delay: Duration,
     body_limits: Vec<(String, Option<usize>)>,
+    stream_bodies: Vec<(String, Option<u64>)>,
     header_read_timeout: Option<Duration>,
     max_connections: Option<usize>,
     max_connections_per_ip: Option<usize>,
@@ -56,6 +57,7 @@ struct Shared {
     middlewares: Vec<Arc<dyn Middleware>>,
     max_body_size: Option<usize>,
     body_limits: Vec<(String, Option<usize>)>,
+    stream_bodies: Vec<(String, Option<u64>)>,
     state: Arc<StateMap>,
     shutdown: Shutdown,
     header_read_timeout: Option<Duration>,
@@ -85,6 +87,7 @@ impl App {
             shutdown_grace: Duration::from_secs(10),
             shutdown_delay: Duration::ZERO,
             body_limits: Vec::new(),
+            stream_bodies: Vec::new(),
             header_read_timeout: Some(Duration::from_secs(30)),
             max_connections: None,
             max_connections_per_ip: None,
@@ -215,6 +218,15 @@ impl App {
     /// (default 10 seconds)
     pub fn shutdown_grace(mut self, grace: Duration) -> Self {
         self.shutdown_grace = grace;
+        self
+    }
+
+    /// Do not buffer request bodies under `prefix`: handlers read them with
+    /// [`Request::body_stream`](crate::request::Request::body_stream), see [`crate::upload`]. `max_bytes` caps the
+    /// body (enforced while it arrives, `None` for no cap); `max_body_size` and
+    /// `body_limit` do not apply to these routes.
+    pub fn stream_body(mut self, prefix: &str, max_bytes: Option<u64>) -> Self {
+        self.stream_bodies.push((prefix.to_string(), max_bytes));
         self
     }
 
@@ -621,6 +633,7 @@ impl App {
             middlewares: self.middlewares,
             max_body_size: self.max_body_size,
             body_limits: self.body_limits,
+            stream_bodies: self.stream_bodies,
             state: Arc::new(self.state),
             shutdown,
             header_read_timeout: self.header_read_timeout,
@@ -895,20 +908,32 @@ async fn handle_request(
 ) -> hyper::Response<crate::response::HyperBody> {
     let path = req.uri().path().to_string();
     let max_body_size = body_limit_for(&shared.body_limits, &path, shared.max_body_size);
+    let streaming = stream_limit_for(&shared.stream_bodies, &path);
 
     // Convert hyper request to our Request type
     let (parts, body) = req.into_parts();
 
+    // Streaming routes hand the unread body to the handler
+    let (body, stream) = match streaming {
+        Some(limit) => (
+            None,
+            Some(crate::upload::BodyStream::from_incoming(body, limit)),
+        ),
+        None => (Some(body), None),
+    };
     // Enforce the body size limit while reading, so it also holds for chunked
     // bodies without a Content-Length
-    let body_bytes = match max_body_size {
-        Some(max_size) => match read_limited(body, max_size).await {
-            Ok(bytes) => bytes,
-            Err(too_large) => return too_large.into_hyper(max_size),
-        },
-        None => match body.collect().await {
-            Ok(collected) => collected.to_bytes(),
-            Err(_) => bytes::Bytes::new(),
+    let body_bytes = match body {
+        None => bytes::Bytes::new(),
+        Some(body) => match max_body_size {
+            Some(max_size) => match read_limited(body, max_size).await {
+                Ok(bytes) => bytes,
+                Err(too_large) => return too_large.into_hyper(max_size),
+            },
+            None => match body.collect().await {
+                Ok(collected) => collected.to_bytes(),
+                Err(_) => bytes::Bytes::new(),
+            },
         },
     };
 
@@ -923,6 +948,7 @@ async fn handle_request(
     }
     let mut request = Request::new(parts.method, parts.uri, headers, body_bytes);
     request.extensions = parts.extensions;
+    request.stream = stream;
     run_pipeline(request, conn, &shared).await.into_hyper()
 }
 
@@ -938,13 +964,19 @@ impl InProcess {
         peer: SocketAddr,
         secure: bool,
     ) -> hyper::Response<crate::response::HyperBody> {
-        let max = body_limit_for(
-            &self.shared.body_limits,
-            request.uri.path(),
-            self.shared.max_body_size,
-        );
-        if let Some(max) = max.filter(|max| request.body.len() > *max) {
-            return BodyTooLarge.into_hyper(max);
+        let mut request = request;
+        if let Some(limit) = stream_limit_for(&self.shared.stream_bodies, request.uri.path()) {
+            let body = std::mem::take(&mut request.body);
+            request.stream = Some(crate::upload::BodyStream::from_bytes(body, limit));
+        } else {
+            let max = body_limit_for(
+                &self.shared.body_limits,
+                request.uri.path(),
+                self.shared.max_body_size,
+            );
+            if let Some(max) = max.filter(|max| request.body.len() > *max) {
+                return BodyTooLarge.into_hyper(max);
+            }
         }
         let conn = ConnInfo {
             peer,
@@ -1071,7 +1103,7 @@ async fn read_limited(
 }
 
 /// Read and drop up to [`DRAIN_CAP`] bytes (counting `already` read), for at most [`DRAIN_TIME`]
-async fn drain(body: &mut hyper::body::Incoming, already: u64) {
+pub(crate) async fn drain(body: &mut hyper::body::Incoming, already: u64) {
     let _ = tokio::time::timeout(DRAIN_TIME, async {
         let mut seen = already;
         while seen < DRAIN_CAP {
@@ -1089,6 +1121,22 @@ async fn drain(body: &mut hyper::body::Incoming, already: u64) {
 }
 
 /// Limit for `path`: the longest matching prefix rule, else the default
+/// Cap for a streaming route: `None` when the path is not a streaming route,
+/// `Some(None)` when it is one without a cap
+fn stream_limit_for(rules: &[(String, Option<u64>)], path: &str) -> Option<Option<u64>> {
+    rules
+        .iter()
+        .filter(|(prefix, _)| {
+            prefix.is_empty()
+                || path == prefix
+                || path
+                    .strip_prefix(prefix.as_str())
+                    .is_some_and(|rest| rest.starts_with('/'))
+        })
+        .max_by_key(|(prefix, _)| prefix.len())
+        .map(|(_, limit)| *limit)
+}
+
 fn body_limit_for(
     rules: &[(String, Option<usize>)],
     path: &str,

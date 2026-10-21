@@ -66,6 +66,7 @@ async fn main() {
 - **📝 Forms:** `application/x-www-form-urlencoded` into typed structs
 - **🖼️ Templates:** Built-in dependency-free engine, or plug in your own via `TemplateEngine`
 - **🚦 Rate limiting:** In-memory middleware with `429` / `retry-after`
+- **📤 Streaming uploads:** `App::stream_body` + `Request::body_stream()` read multi-GB bodies piece by piece (`save_to`, limit enforced while it arrives) instead of buffering them
 - **🔗 Trace context:** W3C `traceparent` / `tracestate` via `TraceLayer`, `Request::trace()`, `HttpClient::trace(&req)` and trace ids in the access log
 - **🌐 HTTP client:** `HttpClient` with timeouts, pooling, retries with backoff (only when safe), redirects, response caps and an SSRF guard (`public_only`)
 - **🩺 Health probes:** `Health` liveness/readiness handlers with timeouts, caching, optional vs critical checks, and `App::shutdown_delay` so load balancers drain before connections close
