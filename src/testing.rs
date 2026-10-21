@@ -209,10 +209,6 @@ impl TestRequest {
             .expect("test request path is not a valid URI");
         let method = http::Method::from_bytes(self.method.as_bytes()).expect("invalid method");
         let mut headers = http::HeaderMap::new();
-        headers.insert(
-            http::header::HOST,
-            http::HeaderValue::from_static("localhost"),
-        );
         for (name, value) in &self.headers {
             let (Ok(n), Ok(v)) = (
                 http::HeaderName::from_bytes(name.as_bytes()),
@@ -221,6 +217,13 @@ impl TestRequest {
                 panic!("invalid test header {name}: {value}");
             };
             headers.append(n, v);
+        }
+        // "localhost" unless the test chose a Host itself
+        if !headers.contains_key(http::header::HOST) {
+            headers.insert(
+                http::header::HOST,
+                http::HeaderValue::from_static("localhost"),
+            );
         }
         if let Some(jar) = &self.client.jar {
             let jar = jar.lock().unwrap_or_else(|e| e.into_inner());

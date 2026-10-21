@@ -179,3 +179,68 @@ async fn invalid_networks_are_reported() {
     assert!(TrustedProxies::new().trust("10.0.0.0/40").is_err());
     assert!(TrustedProxies::new().trust("not an ip").is_err());
 }
+
+#[tokio::test]
+async fn allowed_hosts_rejects_unknown_and_malformed_hosts() {
+    use ullun::secure::AllowedHosts;
+    let app = App::new()
+        .middleware(AllowedHosts::new(["example.com", "*.example.com"]).except_paths(["/livez"]))
+        .get("/", |_req: Request| async { Ok(Response::text("ok")) })
+        .get("/livez", |_req: Request| async { Ok(Response::text("up")) });
+    let c = TestClient::new(app);
+    let status = |host: &'static str, path: &'static str| {
+        let c = c.clone();
+        async move { c.get(path).header("host", host).send().await.status() }
+    };
+    for ok in [
+        "example.com",
+        "EXAMPLE.com:8443",
+        "www.example.com",
+        "a.b.example.com",
+    ] {
+        assert_eq!(status(ok, "/").await, 200, "{ok}");
+    }
+    for bad in [
+        "evil.com",
+        "example.com.evil.com",
+        "evilexample.com",
+        "xexample.com",
+        ".example.com",
+        "example.com/x",
+        "user@example.com",
+        "10.1.2.3",
+        "",
+    ] {
+        assert_eq!(status(bad, "/").await, 421, "{bad:?}");
+    }
+    // probes by pod IP are let through on the listed paths only
+    assert_eq!(status("10.1.2.3", "/livez").await, 200);
+    assert_eq!(status("10.1.2.3", "/").await, 421);
+    let res = c.get("/").header("host", "evil.com").send().await;
+    assert!(res.text().contains("Unknown host"));
+}
+
+#[tokio::test]
+async fn allowed_hosts_wildcard_does_not_match_the_bare_domain() {
+    use ullun::secure::AllowedHosts;
+    let app = App::new()
+        .middleware(AllowedHosts::new(["*.example.com"]))
+        .get("/", |_req: Request| async { Ok(Response::text("ok")) });
+    let c = TestClient::new(app);
+    assert_eq!(
+        c.get("/")
+            .header("host", "example.com")
+            .send()
+            .await
+            .status(),
+        421
+    );
+    assert_eq!(
+        c.get("/")
+            .header("host", "api.example.com")
+            .send()
+            .await
+            .status(),
+        200
+    );
+}
