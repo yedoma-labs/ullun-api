@@ -139,39 +139,3 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
-
-  # ---- Release: only on main, only when lint + tests + build are green ----
-  release:
-    name: Release (conventional commits)
-    runs-on: ubuntu-24.04
-    needs: [fmt, clippy, docs, security-audit, test, build]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    concurrency:
-      group: release
-      cancel-in-progress: false
-    permissions:
-      contents: write
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
-
-      # 1. Tag + GitHub release + crates.io publish for a merged release PR
-      - name: Release unpublished versions
-        uses: release-plz/action@v0.5
-        with:
-          command: release
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-
-      # 2. Open / update the release PR (version bump + CHANGELOG from commits)
-      - name: Update release PR
-        uses: release-plz/action@v0.5
-        with:
-          command: release-pr
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}

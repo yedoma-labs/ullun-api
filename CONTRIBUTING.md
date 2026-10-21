@@ -125,12 +125,12 @@ Do not edit `CHANGELOG.md` or the version in `Cargo.toml` by hand; see below.
 
 ## Releases
 
-Fully automated by [release-plz](https://release-plz.dev) in the `release` job of `.github/workflows/ci.yml`:
+Automated by [release-plz](https://release-plz.dev) in `.github/workflows/release.yml`. It runs **once a day** (05:43 UTC) and can be started by hand (Actions → Release → Run workflow). It does not run on merges, so several merges in a day lead to one release PR update and at most one publish:
 
-1. A merge to `main` runs format, clippy, rustdoc, audit, tests (Linux/macOS/Windows) and the release build.
-2. Only if all of them are green does the `release` job run. It never runs on pull requests.
+1. Every merge to `main` runs format, clippy, rustdoc, audit, tests (Linux/macOS/Windows) and the release build (`ci.yml`).
+2. The release workflow proceeds only if CI passed for the head commit of `main` (a manual run can skip the check with `skip_ci_check`).
 3. From the Conventional Commits since the last tag, it opens or updates a **release PR** (version bump + `CHANGELOG.md`).
-4. Merging the release PR tags `vX.Y.Z`, creates the GitHub release and publishes to crates.io.
+4. Merging the release PR tags `vX.Y.Z`, creates the GitHub release and publishes to crates.io on the next run, so start the workflow by hand when you do not want to wait for the schedule. A publish that failed (crates.io rate limit, outage) is retried by the next run.
 
 Required repository secrets: `CARGO_REGISTRY_TOKEN` (crates.io). Optional `RELEASE_TOKEN` (a PAT or GitHub App token): without it the release PR is created with `GITHUB_TOKEN`, and GitHub does not start CI on such PRs, so lint/test must be triggered by pushing to the PR branch or closing/reopening it. Settings → Actions → "Allow GitHub Actions to create and approve pull requests" must be enabled.
 

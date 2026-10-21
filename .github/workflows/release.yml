@@ -1,0 +1,73 @@
+name: Release
+
+# Releases run once a day and on demand, not on every merge to main, so a burst
+# of merges produces one release PR update and at most one publish (crates.io
+# limits how many versions can be published per day).
+#
+# Each run
+#   1. tags, creates the GitHub release and publishes every version on main that
+#      is not on crates.io yet (a merged release PR, or a publish that failed before)
+#   2. opens or updates the release PR (version bump + CHANGELOG from the
+#      Conventional Commits since the last tag)
+#
+# It only proceeds when CI passed for the commit on main it is releasing.
+
+on:
+  schedule:
+    - cron: "43 5 * * *"
+  workflow_dispatch:
+    inputs:
+      skip_ci_check:
+        description: "Release even if CI has not passed for the head of main"
+        type: boolean
+        default: false
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release (conventional commits)
+    runs-on: ubuntu-24.04
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      actions: read
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require green CI on this commit
+        if: ${{ !inputs.skip_ci_check }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          conclusion=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
+            --branch main --commit "$GITHUB_SHA" --event push \
+            --json conclusion --jq '.[0].conclusion // "none"')
+          echo "CI conclusion for $GITHUB_SHA: $conclusion"
+          if [ "$conclusion" != "success" ]; then
+            echo "::error::CI has not passed for $GITHUB_SHA (use skip_ci_check to override)"
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Release unpublished versions
+        uses: release-plz/action@v0.5
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Update release PR
+        uses: release-plz/action@v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}

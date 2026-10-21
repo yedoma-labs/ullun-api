@@ -1,6 +1,6 @@
 # Releases are derived from Conventional Commits on main:
 #   fix: -> patch, feat: -> minor, feat!: / BREAKING CHANGE -> major (minor while 0.x)
-# See .github/workflows/ci.yml (job "release").
+# Runs daily and on demand: see .github/workflows/release.yml.
 
 [workspace]
 changelog_update = true
