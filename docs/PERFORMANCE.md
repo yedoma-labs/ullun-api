@@ -16,16 +16,18 @@ scripts/bench.sh --micro         # additionally run the criterion suites
 
 Results (JSON + Markdown, with CPU, OS, core count, compiler and library versions) are
 written to `bench/results/`; send the `.md` file to compare machines. Reference run,
-ullun-api 0.4.2, axum 0.8.9, actix-web 4.17.0, rustc 1.99.0, Intel i7-8750H (12 logical
+ullun-api 0.4.12, axum 0.8.9, actix-web 4.17.0, rustc 1.99.0, Intel i7-8750H (12 logical
 cores) macOS, 64 connections, 5 s x 3 rounds (median), 6 server + 6 load threads:
 
 | scenario | ullun-api | axum | actix-web |
 |---|---:|---:|---:|
-| hello | 85.6k req/s | 79.6k | 74.0k |
-| json | 79.6k | 78.1k | 76.8k |
-| param | 77.1k | 76.7k | 77.2k |
-| post | 75.8k | 75.9k | 77.8k |
-| middleware (3 layers) | 77.3k | 78.7k | 79.7k |
+| hello | 84.6k req/s | 78.8k | 74.2k |
+| json | 77.1k | 75.6k | 73.4k |
+| param | 73.2k | 74.0k | 74.2k |
+| post | 73.6k | 73.9k | 74.7k |
+| middleware (3 layers) | 75.1k | 75.5k | 75.4k |
+
+p99 latency is 1.0-1.3 ms for every framework and scenario; resident memory is 4-6 MiB for all three servers. The run was repeated after the 0.4.12 feature work (timers, HTTP/2 support, panic isolation, trusted proxies, ...) with no measurable change against 0.4.2 (84-86k req/s for `hello`, within run-to-run noise elsewhere).
 
 Read this honestly: all three land within a few percent of each other, and the load
 generator shares the CPU with the server, so on this machine the measurement is mostly
