@@ -209,16 +209,6 @@ impl Response {
 
     pub(crate) fn into_hyper(self) -> hyper::Response<HyperBody> {
         use http_body_util::BodyExt;
-        let mut builder = hyper::Response::builder().status(self.status);
-
-        for (key, value) in self.headers.iter() {
-            builder = builder.header(key, value);
-        }
-
-        // Add Set-Cookie headers
-        for cookie in self.cookies {
-            builder = builder.header("set-cookie", cookie.to_header_value());
-        }
 
         let body: HyperBody = match self.stream {
             Some(rx) => ChannelBody { rx }.boxed(),
@@ -226,17 +216,19 @@ impl Response {
                 .map_err(|never| match never {})
                 .boxed(),
         };
-        builder.body(body).unwrap_or_else(|e| {
-            eprintln!("Failed to build response: {}", e);
-            hyper::Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .body(
-                    http_body_util::Full::new(Bytes::from("Internal Server Error"))
-                        .map_err(|never| match never {})
-                        .boxed(),
-                )
-                .unwrap()
-        })
+        let mut res = hyper::Response::new(body);
+        *res.status_mut() = self.status;
+        // headers were validated when they were set: move the map as it is
+        *res.headers_mut() = self.headers;
+        for cookie in self.cookies {
+            match http::HeaderValue::from_str(&cookie.to_header_value()) {
+                Ok(v) => {
+                    res.headers_mut().append(http::header::SET_COOKIE, v);
+                }
+                Err(e) => eprintln!("Failed to build response: {}", e),
+            }
+        }
+        res
     }
 }
 

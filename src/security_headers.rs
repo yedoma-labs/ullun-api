@@ -131,12 +131,6 @@ impl Csp {
         self
     }
 
-    fn uses_nonce(&self) -> bool {
-        self.directives
-            .iter()
-            .any(|(_, v)| v.iter().any(|s| s.contains("{nonce}")))
-    }
-
     fn render(&self, nonce: &str) -> String {
         self.directives
             .iter()
@@ -165,6 +159,23 @@ pub struct SecurityHeaders {
     csp: Option<Csp>,
     frame_options: Option<FrameOptions>,
     headers: Vec<(String, String)>,
+    compiled: std::sync::OnceLock<Compiled>,
+}
+
+/// Header names and values parsed once, on the first request
+#[derive(Clone, Debug)]
+struct Compiled {
+    fixed: Vec<(http::HeaderName, http::HeaderValue)>,
+    csp: Option<CompiledCsp>,
+}
+
+#[derive(Clone, Debug)]
+struct CompiledCsp {
+    name: http::HeaderName,
+    /// The policy cut at every `{nonce}`: n parts mean n - 1 nonces
+    parts: Vec<String>,
+    /// Ready value when the policy has no nonce
+    fixed: Option<http::HeaderValue>,
 }
 
 impl Default for SecurityHeaders {
@@ -177,6 +188,7 @@ impl SecurityHeaders {
     pub fn new() -> Self {
         Self {
             csp: None,
+            compiled: std::sync::OnceLock::new(),
             frame_options: Some(FrameOptions::Deny),
             headers: vec![
                 ("x-content-type-options".into(), "nosniff".into()),
@@ -222,41 +234,75 @@ impl SecurityHeaders {
     }
 }
 
-#[async_trait]
-impl Middleware for SecurityHeaders {
-    async fn handle(&self, mut req: Request, next: Next) -> Result<Response> {
-        let mut nonce = String::new();
-        if self.csp.as_ref().is_some_and(Csp::uses_nonce) {
-            nonce = crate::security::random_token(16)?;
-            req.extensions.insert(CspNonce(nonce.clone()));
-        }
-        let mut res = next.run(req).await.unwrap_or_else(Response::from_error);
-
-        let put = |res: &mut Response, name: &str, value: String| {
-            if !res.headers.contains_key(name) {
-                if let (Ok(n), Ok(v)) = (
-                    http::HeaderName::from_bytes(name.as_bytes()),
-                    http::HeaderValue::from_str(&value),
-                ) {
-                    res.headers.insert(n, v);
-                }
+impl SecurityHeaders {
+    fn compile(&self) -> Compiled {
+        let mut fixed = Vec::new();
+        let mut push = |name: &str, value: &str| {
+            if let (Ok(n), Ok(v)) = (
+                http::HeaderName::from_bytes(name.as_bytes()),
+                http::HeaderValue::from_str(value),
+            ) {
+                fixed.push((n, v));
             }
         };
         for (name, value) in &self.headers {
-            put(&mut res, name, value.clone());
+            push(name, value);
         }
         match self.frame_options {
-            Some(FrameOptions::Deny) => put(&mut res, "x-frame-options", "DENY".into()),
-            Some(FrameOptions::SameOrigin) => put(&mut res, "x-frame-options", "SAMEORIGIN".into()),
+            Some(FrameOptions::Deny) => push("x-frame-options", "DENY"),
+            Some(FrameOptions::SameOrigin) => push("x-frame-options", "SAMEORIGIN"),
             None => {}
         }
-        if let Some(csp) = &self.csp {
+        let csp = self.csp.as_ref().and_then(|csp| {
             let name = if csp.report_only {
                 "content-security-policy-report-only"
             } else {
                 "content-security-policy"
             };
-            put(&mut res, name, csp.render(&nonce));
+            let text = csp.render("{nonce}");
+            let parts: Vec<String> = text.split("{nonce}").map(str::to_string).collect();
+            let fixed = (parts.len() == 1)
+                .then(|| http::HeaderValue::from_str(&text).ok())
+                .flatten();
+            Some(CompiledCsp {
+                name: http::HeaderName::from_bytes(name.as_bytes()).ok()?,
+                parts,
+                fixed,
+            })
+        });
+        Compiled { fixed, csp }
+    }
+}
+
+#[async_trait]
+impl Middleware for SecurityHeaders {
+    async fn handle(&self, mut req: Request, next: Next) -> Result<Response> {
+        let compiled = self.compiled.get_or_init(|| self.compile());
+        let mut nonce = None;
+        if compiled.csp.as_ref().is_some_and(|c| c.parts.len() > 1) {
+            let n = crate::security::random_token(16)?;
+            req.extensions.insert(CspNonce(n.clone()));
+            nonce = Some(n);
+        }
+        let mut res = next.run(req).await.unwrap_or_else(Response::from_error);
+
+        res.headers.reserve(compiled.fixed.len() + 1);
+        for (name, value) in &compiled.fixed {
+            if !res.headers.contains_key(name) {
+                res.headers.insert(name.clone(), value.clone());
+            }
+        }
+        if let Some(csp) = &compiled.csp {
+            if !res.headers.contains_key(&csp.name) {
+                let value = match (&csp.fixed, &nonce) {
+                    (Some(v), _) => Some(v.clone()),
+                    (None, Some(n)) => http::HeaderValue::from_str(&csp.parts.join(n)).ok(),
+                    (None, None) => None,
+                };
+                if let Some(v) = value {
+                    res.headers.insert(csp.name.clone(), v);
+                }
+            }
         }
         Ok(res)
     }
@@ -269,7 +315,6 @@ mod tests {
     #[test]
     fn renders_directives_and_nonce() {
         let csp = Csp::web().script_src(["'self'", "'nonce-{nonce}'"]);
-        assert!(csp.uses_nonce());
         let text = csp.render("abc");
         assert!(text.starts_with("default-src 'self'; "));
         assert!(text.contains("script-src 'self' 'nonce-abc'"));
