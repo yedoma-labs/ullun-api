@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.12](https://github.com/yedoma-labs/ullun-api/compare/v0.4.11...v0.4.12) - 2026-10-21
+
+### Added
+
+- *(rate-limit)* add sliding window mode
+- *(static)* add precompressed variants, immutable caching and SPA fallback
+
+### Other
+
+- group the feature overview and update install version and roadmap
+
 ## [0.4.11](https://github.com/yedoma-labs/ullun-api/compare/v0.4.10...v0.4.11) - 2026-10-21
 
 ### Added
