@@ -712,6 +712,7 @@ Complete services that run as they are and are covered by integration tests (`te
 
 | App | Run | What it demonstrates |
 |-----|-----|----------------------|
+| [`production`](examples/production) | `cargo run --example production` | Service skeleton with the middleware in a sensible order: trace + request ids + JSON access log + metrics, security headers, CORS, problem+json, timeout / concurrency / sliding rate limit, API-key admin area, cached catalog, idempotent orders, trusted proxies, probes with shutdown drain |
 | [`orders`](examples/orders) | `cargo run --example orders` | Checkout API for a browser shop: CORS with credentials, security headers, required idempotency keys (retries place one order), no overselling, timeout and load shedding |
 | [`shortener`](examples/shortener) | `cargo run --example shortener` | URL shortener: API-key management API, public redirects, click counting, expiry, per-key rate limit, JSON file persistence, OpenAPI |
 | [`taskboard`](examples/taskboard) (`jwt`) | `DEV=1 cargo run --example taskboard --features jwt` | REST API: registration/login (argon2 + JWT), per-user projects and tasks, 422 field errors, filter/sort/pagination, ETag + If-Match, login throttling, OpenAPI + Swagger UI |
