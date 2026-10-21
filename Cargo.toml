@@ -38,9 +38,11 @@ tls = ["dep:tokio-rustls"]
 client-tls = ["dep:tokio-rustls", "dep:webpki-roots"]
 # RS256 / ES256 JSON Web Tokens and JWKS (ring)
 jwt-asymmetric = ["jwt", "dep:ring"]
+# Redis client (no dependencies) and Redis stores for sessions, rate limits, idempotency keys
+redis = []
 # encrypted ("private") cookies: ChaCha20-Poly1305
 encryption = ["dep:chacha20poly1305", "dep:base64"]
-full = ["jwt", "jwt-asymmetric", "signing", "encryption", "compression", "websocket", "tls", "client-tls"]
+full = ["jwt", "jwt-asymmetric", "signing", "encryption", "redis", "compression", "websocket", "tls", "client-tls"]
 
 [package.metadata.docs.rs]
 all-features = true

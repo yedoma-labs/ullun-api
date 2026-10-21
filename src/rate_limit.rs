@@ -48,8 +48,20 @@ pub struct Decision {
     pub reset_secs: u64,
 }
 
+/// Where request counts live. The default is process memory; implement it (or
+/// use `RedisRateLimitStore`, feature `redis`) to share limits between instances.
+///
+/// A store decides by itself what to do when its backend fails; the Redis one
+/// lets requests through.
+#[async_trait]
+pub trait RateLimitStore: Send + Sync + 'static {
+    /// Count one request for `key` against `limit` per `window`
+    async fn hit(&self, key: &str, limit: u32, window: Duration, sliding: bool) -> Decision;
+}
+
 /// Fixed-window rate limiter, usable as middleware
 pub struct RateLimiter {
+    store: Option<Arc<dyn RateLimitStore>>,
     limit: u32,
     window: Duration,
     max_keys: usize,
@@ -62,6 +74,7 @@ impl RateLimiter {
     /// Allow `limit` requests per `window` for each client IP
     pub fn new(limit: u32, window: Duration) -> Self {
         Self {
+            store: None,
             limit,
             window,
             max_keys: 100_000,
@@ -69,6 +82,13 @@ impl RateLimiter {
             key_fn: Arc::new(|req| req.client_ip().map(|ip| ip.to_string())),
             state: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Count in `store` instead of process memory, so that all instances of a
+    /// service share one budget per client
+    pub fn store(mut self, store: impl RateLimitStore) -> Self {
+        self.store = Some(Arc::new(store));
+        self
     }
 
     /// Count over a window that slides with time instead of resetting at fixed
@@ -229,7 +249,10 @@ impl Middleware for RateLimiter {
             return next.run(req).await;
         };
 
-        let decision = self.check(&key, Instant::now());
+        let decision = match &self.store {
+            Some(store) => store.hit(&key, self.limit, self.window, self.sliding).await,
+            None => self.check(&key, Instant::now()),
+        };
         let res = if decision.allowed {
             match next.run(req).await {
                 Ok(res) => res,

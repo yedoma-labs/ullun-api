@@ -128,6 +128,7 @@ Optional features (everything else is always on):
 | `jwt` | `ullun::jwt` - HS256 tokens, `JwtAuth` middleware | `hmac`, `sha2`, `base64` |
 | `signing` | `ullun::signed_cookies` - tamper-proof cookies with key rotation (HMAC-SHA256) | `hmac`, `sha2`, `base64` |
 | `jwt-asymmetric` | `ullun::jwt_keys` - RS256 / ES256 tokens, JWKS parsing, `JwtAuth::with_keys` | `ring` |
+| `redis` | `ullun::redis` - Redis client and shared stores for sessions, rate limits and idempotency keys across instances | none |
 | `encryption` | `ullun::private_cookies` - encrypted, tamper-proof cookies with key rotation (XChaCha20-Poly1305) | `chacha20poly1305`, `base64` |
 | `compression` | `ullun::compression::Compression` - gzip middleware | `flate2` |
 | `websocket` | `App::ws`, `ullun::websocket` | `tokio-tungstenite`, `futures-util` |
@@ -821,6 +822,7 @@ See [SECURITY.md](SECURITY.md) for comprehensive guidelines and best practices.
 - [x] TLS with reload and client certificates, HTTP/2 over ALPN, WebSockets, SSE, streaming bodies
 - [x] Health probes, graceful shutdown with drain delay, connection and concurrency limits, response cache
 - [x] Request ids, access log, metrics, W3C trace context, outbound HTTP client, in-process `TestClient`
+- [x] Shared Redis stores for sessions, rate limits and idempotency keys (`redis` feature, zero dependencies)
 - [x] Cleartext HTTP/2 with prior knowledge (`App::h2c`)
 - [x] RS256/ES256 JWTs and JWKS (`jwt-asymmetric` feature)
 - [x] Encrypted ("private") cookies (`encryption` feature)
@@ -828,7 +830,7 @@ See [SECURITY.md](SECURITY.md) for comprehensive guidelines and best practices.
 
 ### Ideas
 - [ ] OpenAPI schemas derived from types (needs a derive macro or `schemars`)
-- [ ] Shared stores (Redis, SQL) for sessions, rate limits and idempotency keys behind the existing traits
+- [ ] SQL-backed stores behind the same traits
 - [ ] HTTP/2 in the outbound client
 
 ## CI/CD
@@ -838,7 +840,7 @@ GitHub Actions (`.github/workflows/ci.yml`):
 - ✅ **Test:** Linux, macOS, Windows
 - ✅ **Build:** release build of all examples, benchmarks compile
 - ✅ **Commits:** PR title and commits must be [Conventional Commits](https://www.conventionalcommits.org/)
-- ✅ **Release:** on `main`, *only after lint, tests and build passed*, [release-plz](https://release-plz.dev) derives the next version from the commits, maintains a release PR with the changelog, and on merge tags, creates the GitHub release and publishes to crates.io
+- ✅ **Release:** a separate workflow (`release.yml`) runs once a day and on demand, not on every merge. Once CI is green for `main` it lets [release-plz](https://release-plz.dev) derive the next version from the commits, maintain a release PR with the changelog, and on merge tag, create the GitHub release and publish to crates.io
 
 See [CONTRIBUTING.md](CONTRIBUTING.md#releases) for the details and required secrets.
 

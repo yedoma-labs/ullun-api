@@ -29,6 +29,7 @@
 //! | `encryption` | `ullun::private_cookies` - encrypted cookies |
 //! | `jwt` | `ullun::jwt` - HS256 tokens and bearer-auth middleware |
 //! | `jwt-asymmetric` | `ullun::jwt_keys` - RS256 / ES256 tokens and JWKS |
+//! | `redis` | `ullun::redis` - Redis client and shared stores for sessions, rate limits and idempotency keys |
 //! | `compression` | `ullun::compression` - gzip middleware |
 //! | `websocket` | `App::ws` and `ullun::websocket` |
 //! | `full` | all of the above |
@@ -70,6 +71,8 @@ pub mod private_cookies;
 pub mod problem;
 pub mod proxy;
 pub mod rate_limit;
+#[cfg(feature = "redis")]
+pub mod redis;
 pub mod request;
 pub mod response;
 pub mod router;

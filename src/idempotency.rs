@@ -46,7 +46,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use http::Method;
 use std::collections::HashMap;
-use std::hash::{BuildHasher, Hash, Hasher};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -182,8 +182,10 @@ pub struct Idempotency {
     lock_ttl: Duration,
     max_response: usize,
     required: bool,
-    scope: Arc<ScopeFn>,
-    hasher: std::collections::hash_map::RandomState,
+    /// `None`: the `Authorization` + `Cookie` headers
+    scope: Option<Arc<ScopeFn>>,
+    /// Mixed into every hash; random per process unless set with [`Idempotency::shared_seed`]
+    seed: Vec<u8>,
 }
 
 impl Default for Idempotency {
@@ -199,8 +201,13 @@ impl Idempotency {
     }
 
     pub fn with_store(store: impl IdempotencyStore) -> Self {
-        let hasher = std::collections::hash_map::RandomState::new();
-        let scope_hasher = hasher.clone();
+        // unguessable per process, so clients cannot craft colliding scopes
+        let seed = crate::security::random_bytes(16).unwrap_or_else(|_| {
+            let state = std::collections::hash_map::RandomState::new();
+            let mut h = std::hash::BuildHasher::build_hasher(&state);
+            h.write_u8(0);
+            h.finish().to_le_bytes().to_vec()
+        });
         Self {
             store: Arc::new(store),
             header: "idempotency-key".into(),
@@ -209,14 +216,38 @@ impl Idempotency {
             lock_ttl: Duration::from_secs(60),
             max_response: 256 * 1024,
             required: false,
-            scope: Arc::new(move |req| {
-                let mut h = scope_hasher.build_hasher();
+            scope: None,
+            seed,
+        }
+    }
+
+    /// Secret that makes the hashes behind scopes and payload fingerprints
+    /// identical on every instance. Required with a store shared between
+    /// processes (Redis): by default each process hashes with its own random
+    /// seed, and instances would disagree about whose key is whose. Keep it
+    /// secret and at least 16 bytes: it keeps clients from crafting colliding
+    /// scopes.
+    pub fn shared_seed(mut self, seed: impl AsRef<[u8]>) -> Self {
+        self.seed = seed.as_ref().to_vec();
+        self
+    }
+
+    fn hasher(&self) -> DefaultHasher {
+        let mut h = DefaultHasher::new();
+        h.write(&self.seed);
+        h
+    }
+
+    fn scope_of(&self, req: &Request) -> String {
+        match &self.scope {
+            Some(f) => f(req),
+            None => {
+                let mut h = self.hasher();
                 for name in ["authorization", "cookie"] {
                     req.headers.get(name).map(|v| v.as_bytes()).hash(&mut h);
                 }
                 format!("{:016x}", h.finish())
-            }),
-            hasher,
+            }
         }
     }
 
@@ -265,12 +296,12 @@ impl Idempotency {
     where
         F: Fn(&Request) -> String + Send + Sync + 'static,
     {
-        self.scope = Arc::new(f);
+        self.scope = Some(Arc::new(f));
         self
     }
 
     fn fingerprint(&self, req: &Request) -> u64 {
-        let mut h = self.hasher.build_hasher();
+        let mut h = self.hasher();
         req.method.as_str().hash(&mut h);
         req.uri.path().hash(&mut h);
         req.uri.query().hash(&mut h);
@@ -326,7 +357,7 @@ impl Middleware for Idempotency {
             },
         };
 
-        let store_key = format!("{}|{}", (self.scope)(&req), key);
+        let store_key = format!("{}|{}", self.scope_of(&req), key);
         let fingerprint = self.fingerprint(&req);
         match self
             .store
