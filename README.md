@@ -54,30 +54,29 @@ async fn main() {
 
 ## Features
 
-- **🚀 Fast:** Built on hyper + tokio, measured numbers in [PERFORMANCE.md](docs/PERFORMANCE.md)
-- **🎯 Simple:** Express.js-style routing, zero boilerplate
-- **🔒 Type-safe:** Path parameters validated at compile-time
-- **🔗 Middleware:** Chain middleware like Express.js
-- **📦 Batteries-included:** JSON serialization, error handling, CORS (`Cors`: exact origins, `Vary`, preflight, no credentialed wildcard) and security headers (`SecurityHeaders`, CSP builder with per-request nonces)
-- **🎨 Ergonomic:** Result<T, E> maps to HTTP status codes automatically
-- **🍪 Cookie Support:** Parse and set HTTP cookies with ease
-- **📁 Static Files:** Serve static files from directories
-- **🎯 Route Groups:** Organize routes with common prefixes, optionally with group-level middleware
-- **📝 Forms:** `application/x-www-form-urlencoded` into typed structs
-- **🖼️ Templates:** Built-in dependency-free engine, or plug in your own via `TemplateEngine`
-- **🚦 Rate limiting:** In-memory middleware with `429` / `retry-after`, fixed or sliding window (no double burst at the window boundary)
-- **🗂️ SPA-ready static files:** `serve_static_with` serves precompressed `.br`/`.gz` variants, marks hashed assets `immutable` and falls back to `index.html` for client-side routes
-- **📤 Streaming uploads:** `App::stream_body` + `Request::body_stream()` read multi-GB bodies piece by piece (`save_to`, limit enforced while it arrives) instead of buffering them
-- **🔗 Trace context:** W3C `traceparent` / `tracestate` via `TraceLayer`, `Request::trace()`, `HttpClient::trace(&req)` and trace ids in the access log
-- **🌐 HTTP client:** `HttpClient` with timeouts, pooling, retries with backoff (only when safe), redirects, response caps and an SSRF guard (`public_only`)
-- **🩺 Health probes:** `Health` liveness/readiness handlers with timeouts, caching, optional vs critical checks, and `App::shutdown_delay` so load balancers drain before connections close
-- **🧪 In-process testing:** `TestClient` runs requests through routing and middleware without sockets, with cookie jar and JSON helpers
-- **⚡ Response cache:** `ResponseCache` with request coalescing (no stampede), stale-while-revalidate, `Vary`, `Cache-Control` aware, bypasses credentialed requests
-- **🔁 Idempotency keys:** `Idempotency` middleware replays the stored response of a retried `POST` (409 while running, 422 on payload mismatch, per-caller scope)
-- **🛡️ Resilience:** header-read timeout (slowloris), connection caps (total and per IP), `Timeout` (504) and `ConcurrencyLimit` load shedding (503 + `Retry-After`)
-- **📖 OpenAPI 3.1:** Document generated from your routes, optional Swagger UI
-- **🧰 State & security helpers:** `App::state` / `Request::state`, CSPRNG tokens, constant-time comparison
-- **🔐 JWT** (`jwt` feature), **🗜️ gzip** (`compression` feature), **🔌 WebSockets** (`websocket` feature)
+**Core**
+- 🚀 Built on hyper + tokio, measured numbers in [PERFORMANCE.md](docs/PERFORMANCE.md), reproducible against axum and actix-web with `scripts/bench.sh`
+- 🎯 Express-style routing and `(req, next)` middleware, route groups with group-level middleware, `async fn(Request) -> Result<Response>` handlers
+- 🔒 Typed query/form/JSON extraction, `Validator` with 422 responses, `Error` that maps to status codes
+- 🍪 Cookies, forms, multipart uploads, [templates](#templates) (dependency-free engine or your own), static files
+- 📖 OpenAPI 3.1 generated from your routes, optional Swagger UI
+- 🔌 Server-sent events, streaming responses, WebSockets (`websocket` feature), pub/sub `Hub`, background `JobQueue`
+
+**Security**
+- 🛡️ `Cors` (exact origins, `Vary`, preflight, never a credentialed wildcard), `SecurityHeaders` with a CSP builder and per-request nonces
+- 🔐 Sessions + CSRF, JWT (`jwt` feature), HTTPS with certificate reload and client certificates (`tls` feature), HTTP/2 via ALPN, `RequireHttps` / `Hsts`
+- 🚦 Rate limiting (fixed or sliding window), constant-time comparison, CSPRNG tokens, SSRF guard (`resolve_public`, `HttpClient::public_only`)
+- 🔁 `Idempotency` keys: a retried `POST` runs once and replays its response
+
+**Reliability**
+- 🧯 Slowloris protection (`header_read_timeout`), connection caps, `Timeout` (504), `ConcurrencyLimit` load shedding (503 + `Retry-After`), body limits per prefix
+- 🩺 `Health` liveness/readiness probes and `App::shutdown_delay` so load balancers drain first; graceful shutdown with background tasks
+- ⚡ `ResponseCache` with request coalescing and stale-while-revalidate; `HttpClient` with pooling, safe retries, redirects and response caps
+
+**Observability and testing**
+- 📈 Request ids, access log (text/JSON), Prometheus `Metrics`, W3C trace context (`TraceLayer`, `HttpClient::trace`)
+- 🧪 `TestClient` runs an `App` in-process without sockets (cookie jar, JSON helpers); RFC 9457 `ProblemDetails`; `Accept` / `Accept-Language` negotiation
+- 📤 Streaming uploads (`App::stream_body`), SPA-ready static files (precompressed variants, immutable assets, `index.html` fallback)
 
 ## ⚠️ Production Readiness
 
@@ -92,14 +91,14 @@ async fn main() {
 ### ⚠️ User Must Implement
 - **Authentication/Authorization** - Use middleware (see `examples/todo_api.rs`)
 - **Rate Limiting** - `RateLimiter` middleware per instance; use a reverse proxy (nginx/Caddy) or a shared store for a global limit
-- **TLS/HTTPS** - Use reverse proxy (never expose raw HTTP in production)
+- **TLS/HTTPS** - Terminate TLS at a reverse proxy or serve HTTPS directly with `App::tls` (never expose raw HTTP in production)
 - **Input Validation** - Validate business logic (framework validates types)
 - **SQL Injection Prevention** - Use parameterized queries (sqlx, diesel)
 - **XSS Protection** - Sanitize HTML output (if serving HTML)
 
 ### 📋 Pre-Production Checklist
 1. ✅ Implement authentication middleware
-2. ✅ Use reverse proxy (nginx/Caddy) for TLS termination
+2. ✅ Terminate TLS at a reverse proxy (nginx/Caddy) or with `App::tls`
 3. ✅ Add monitoring/observability (Prometheus, Sentry)
 4. ✅ Follow [SECURITY.md](SECURITY.md) checklist
 5. ✅ Load test your specific workload (`wrk`, `hey`, `ab`)
@@ -113,7 +112,7 @@ async fn main() {
 
 ```toml
 [dependencies]
-ullun-api = "0.3"
+ullun-api = "0.4"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -131,7 +130,7 @@ Optional features (everything else is always on):
 | `full` | all of the above | |
 
 ```toml
-ullun-api = { version = "0.3", features = ["jwt", "websocket"] }
+ullun-api = { version = "0.4", features = ["jwt", "websocket"] }
 ```
 
 ## Quick Start
@@ -810,17 +809,19 @@ See [SECURITY.md](SECURITY.md) for comprehensive guidelines and best practices.
 ## Roadmap
 
 ### Done
-- [x] Route groups, cookies, static file serving, body size limits (0.2)
-- [x] Scenario examples, end-to-end HTTP benchmarks
-- [x] Group-level middleware, form parsing, template engine integration
-- [x] Rate limiting, JWT, gzip compression, WebSockets, OpenAPI generation
+- [x] Routing, groups, middleware, cookies, forms, multipart, static files, templates, OpenAPI
+- [x] Sessions, CSRF, JWT, rate limiting (fixed and sliding window), CORS, security headers, idempotency keys
+- [x] TLS with reload and client certificates, HTTP/2 over ALPN, WebSockets, SSE, streaming bodies
+- [x] Health probes, graceful shutdown with drain delay, connection and concurrency limits, response cache
+- [x] Request ids, access log, metrics, W3C trace context, outbound HTTP client, in-process `TestClient`
+- [x] Portable benchmark against axum and actix-web (`scripts/bench.sh`)
 
 ### Ideas
 - [ ] OpenAPI schemas derived from types (needs a derive macro or `schemars`)
-- [ ] `multipart/form-data` uploads
-- [ ] `HEAD` / `OPTIONS` handling in the router
-- [ ] Shared rate-limit stores (Redis) behind a trait
+- [ ] Shared stores (Redis, SQL) for sessions, rate limits and idempotency keys behind the existing traits
 - [ ] More JWT algorithms (RS256/ES256) and JWKS
+- [ ] Cleartext HTTP/2 (h2c) and HTTP/2 in the outbound client
+- [ ] Encrypted ("private") cookies
 
 ## CI/CD
 
