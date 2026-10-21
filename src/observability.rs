@@ -270,7 +270,7 @@ impl Middleware for AccessLog {
             req.uri.path()
         };
         let path = clean(path, 300);
-        let remote = req.remote_addr.map(|a| a.ip().to_string());
+        let remote = req.client_ip().map(|ip| ip.to_string());
         let route = req.matched_path.as_deref().map(str::to_owned);
         let user_agent = req
             .headers

@@ -58,6 +58,7 @@ pub mod negotiate;
 pub mod observability;
 pub mod openapi;
 pub mod problem;
+pub mod proxy;
 pub mod rate_limit;
 pub mod request;
 pub mod response;

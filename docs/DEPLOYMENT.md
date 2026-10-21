@@ -305,6 +305,18 @@ spec:
   type: LoadBalancer
 ```
 
+#### Behind a load balancer
+
+```rust
+use ullun::proxy::TrustedProxies;
+
+App::new()
+    // addresses of the proxies / ingress, never "everything"
+    .trusted_proxies(TrustedProxies::new().trust("10.0.0.0/8")?)
+```
+
+Without this, every client looks like the proxy to rate limits and logs.
+
 #### Probes and zero-downtime rollouts
 
 ```rust

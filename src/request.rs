@@ -164,6 +164,7 @@ pub struct Request {
     pub(crate) state: Option<std::sync::Arc<StateMap>>,
     pub(crate) shutdown: Option<crate::shutdown::Shutdown>,
     pub(crate) stream: Option<crate::upload::BodyStream>,
+    pub(crate) trusted_proxies: Option<std::sync::Arc<crate::proxy::TrustedProxies>>,
     cookies: OnceLock<Cookies>,
 }
 
@@ -193,6 +194,7 @@ impl Request {
             state: None,
             shutdown: None,
             stream: None,
+            trusted_proxies: None,
             cookies: OnceLock::new(),
         }
     }
@@ -243,12 +245,13 @@ impl Request {
         copy.secure = self.secure;
         copy.state = self.state.clone();
         copy.shutdown = self.shutdown.clone();
+        copy.trusted_proxies = self.trusted_proxies.clone();
         copy
     }
 
     /// True when the request came in over TLS
     pub fn is_secure(&self) -> bool {
-        self.secure
+        self.secure || self.forwarded_https()
     }
 
     /// Nonce for inline scripts and styles, when the
