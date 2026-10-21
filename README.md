@@ -66,6 +66,7 @@ async fn main() {
 - **📝 Forms:** `application/x-www-form-urlencoded` into typed structs
 - **🖼️ Templates:** Built-in dependency-free engine, or plug in your own via `TemplateEngine`
 - **🚦 Rate limiting:** In-memory middleware with `429` / `retry-after`
+- **🌐 HTTP client:** `HttpClient` with timeouts, pooling, retries with backoff (only when safe), redirects, response caps and an SSRF guard (`public_only`)
 - **🩺 Health probes:** `Health` liveness/readiness handlers with timeouts, caching, optional vs critical checks, and `App::shutdown_delay` so load balancers drain before connections close
 - **🧪 In-process testing:** `TestClient` runs requests through routing and middleware without sockets, with cookie jar and JSON helpers
 - **⚡ Response cache:** `ResponseCache` with request coalescing (no stampede), stale-while-revalidate, `Vary`, `Cache-Control` aware, bypasses credentialed requests
@@ -122,6 +123,7 @@ Optional features (everything else is always on):
 | `jwt` | `ullun::jwt` - HS256 tokens, `JwtAuth` middleware | `hmac`, `sha2`, `base64` |
 | `compression` | `ullun::compression::Compression` - gzip middleware | `flate2` |
 | `websocket` | `App::ws`, `ullun::websocket` | `tokio-tungstenite`, `futures-util` |
+| `client-tls` | `ullun::client` over HTTPS (plain `http://` works without it) | `tokio-rustls`, `webpki-roots` |
 | `tls` | `App::tls`, `ullun::tls` - HTTPS, certificate reload, client certificates | `tokio-rustls` (rustls + ring) |
 | `full` | all of the above | |
 
