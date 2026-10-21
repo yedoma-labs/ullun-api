@@ -1,235 +1,128 @@
 # ullun-api Architecture
 
-## Overview
+## Principles
 
-ullun-api is built on three core principles:
-1. **Simplicity** - Express.js-style API
-2. **Performance** - Zero-cost abstractions on hyper/tokio
-3. **Type Safety** - Compile-time guarantees
+1. **Simple surface** - an Express-style builder (`App::new().get(..).middleware(..).run(..)`); everything else is an opt-in module.
+2. **Thin core on hyper/tokio** - the core adds routing, middleware and conversions, not a runtime of its own.
+3. **Safe defaults** - limits, timeouts and header hygiene are on or one call away; unsafe code is not used.
+4. **Few dependencies** - the core needs `hyper`, `tokio`, `matchit`, `serde`; heavier things (`rustls`, `hmac`, `flate2`, WebSocket) sit behind cargo features.
+5. **Testable without sockets** - the whole request pipeline can run in-process (`testing::TestClient`).
 
-## Module Structure
-
-```
-src/
-├── lib.rs         # Public API and prelude
-├── app.rs         # Main application orchestrator
-├── router.rs      # HTTP routing (matchit-based)
-├── handler.rs     # Handler traits and wrappers
-├── middleware.rs  # Middleware chain
-├── request.rs     # Request types and extractors
-├── response.rs    # Response builders
-└── error.rs       # Error types and Result alias
-```
-
-## Request Flow
+## Layers
 
 ```
-TCP Connection
-    │
-    ├─> hyper HTTP/1 Server
-    │
-    ├─> App::handle_request()
-    │   ├─> Parse request body
-    │   ├─> Router::match_route()
-    │   │   └─> matchit::Router<DynHandler>
-    │   │
-    │   ├─> Middleware Chain
-    │   │   ├─> Middleware 1
-    │   │   ├─> Middleware 2
-    │   │   └─> Handler
-    │   │
-    │   └─> Response::into_hyper()
-    │
-    └─> Send HTTP response
+                 ┌──────────────────────────────────────────────────────────┐
+ application     │ handlers, App builder, route groups                      │
+                 └──────────────────────────────────────────────────────────┘
+                 ┌──────────────────────────────────────────────────────────┐
+ middleware      │ cors, security_headers, session, csrf, jwt, rate_limit,  │
+ (opt-in)        │ limits, idempotency, cache, compression, conditional,    │
+                 │ observability, trace, problem, secure                    │
+                 └──────────────────────────────────────────────────────────┘
+                 ┌──────────────────────────────────────────────────────────┐
+ core            │ app, router, handler, middleware, request, response,     │
+                 │ error, cookies, upload, stream, shutdown                 │
+                 └──────────────────────────────────────────────────────────┘
+                 ┌──────────────────────────────────────────────────────────┐
+ transport       │ hyper (HTTP/1.1, HTTP/2), tokio, tls (rustls)            │
+                 └──────────────────────────────────────────────────────────┘
 ```
 
-## Key Components
+Modules above the core never reach into `app.rs`; they talk to the framework only through `Middleware`, `Handler`, `Request` and `Response`. That keeps them replaceable and individually testable.
 
-### App
+## Module map
 
-The main orchestrator. Uses builder pattern to configure routes and middleware before running.
+| Area | Modules |
+|------|---------|
+| Core | `app` (builder, accept loop, connection driving), `router` (matchit per method), `handler`, `middleware` (`Middleware`, `Next`, `Layered`), `request`, `response`, `error`, `cookies`, `shutdown` |
+| Request bodies | `upload` (streaming), `multipart`, `validate` (field errors → 422) |
+| Responses | `sse`, `stream`, `files` (ranges, conditional), `static_files` (precompressed, SPA), `template` |
+| Security | `cors`, `security_headers`, `session`, `csrf`, `jwt`, `signed_cookies`, `security` (tokens, SSRF checks), `secure` (HTTPS policy), `tls`, `rate_limit` |
+| Reliability | `limits` (timeouts, concurrency, connection caps), `health`, `idempotency`, `cache`, `jobs`, `hub`, `compression`, `conditional` |
+| Observability | `observability` (request id, access log, metrics), `trace` (W3C trace context) |
+| API contract | `openapi`, `problem` (RFC 9457), `negotiate` |
+| Outbound / tests | `client` (HTTP client), `testing` (in-process `TestClient`) |
 
-```rust
-pub struct App {
-    router: Router,              // Routing table
-    middlewares: Vec<Arc<dyn Middleware>>,  // Middleware stack
-}
+Optional dependencies are behind features: `jwt`/`signing` (hmac, sha2, base64), `compression` (flate2), `websocket`, `tls` and `client-tls` (rustls, webpki-roots).
+
+## Request flow
+
+```
+TCP accept (app.rs)
+  ├─ ConnLimits.admit()        total / per-IP caps → 503 and close
+  ├─ TLS handshake (tls feature, own task, timeout) → ALPN: h2 | http/1.1
+  └─ serve_connection
+       ├─ http1::Builder  (header_read_timeout, upgrades for WebSocket)
+       └─ http2::Builder  (stream cap, keep-alive pings)
+            │
+            ▼
+       handle_request(hyper::Request<Incoming>)
+         ├─ body: buffered up to max_body_size / body_limit, or left unread for stream_body routes
+         ├─ :authority → Host header (HTTP/2)
+         └─ run_pipeline(Request)                       ← shared with TestClient
+              ├─ Router::match_route_with_pattern → Found(handler) | Miss(allow)
+              ├─ middleware chain, in registration order
+              │    (global middleware first, then group middleware, then the handler)
+              ├─ Err(e) → Response::from_error
+              └─ HEAD → headers only
+            │
+            ▼
+       Response::into_hyper → written by hyper
 ```
 
-During `.run()`, Router and middlewares are wrapped in `Arc` for shared access across async tasks.
+Everything between `handle_request` and `into_hyper` is plain data in, plain data out, which is why `TestClient` can call `run_pipeline` directly.
 
-### Router
+### Middleware order
 
-Fast path-based routing using the `matchit` library.
+Middleware wraps from the outside in: the first registered runs first on the way in and last on the way out. A sensible order:
 
-```rust
-pub struct Router {
-    get: matchit::Router<DynHandler>,
-    post: matchit::Router<DynHandler>,
-    // ... other methods
-}
-```
+1. `TraceLayer`, `RequestIdLayer`, `AccessLog`, `Metrics` - see everything, including rejections
+2. `SecurityHeaders`, `Cors` - decorate every response, including errors and preflights
+3. `ProblemDetails` - convert error bodies produced further in
+4. `Timeout`, `ConcurrencyLimit`, `RateLimiter` - shed load before doing work
+5. `SessionLayer`, `Csrf`, `JwtAuth` - identity
+6. `Idempotency`, `ResponseCache`, `Compression`, `ETags` - per-route behaviour (use groups to scope them)
 
-- Separate router per HTTP method for O(1) method dispatch
-- matchit provides fast path matching with parameter extraction
-- Handlers are type-erased (`Arc<dyn Handler>`) for flexibility
+Middleware also runs for unmatched routes (404/405/OPTIONS), so CORS preflights and request ids work without a route.
 
-### Handler
+## Extension points
 
-Trait for request handlers. Supports both closures and async functions.
+| Trait | Purpose | Default |
+|-------|---------|---------|
+| `Handler` | anything that answers a request; implemented for async closures and `async fn(Request)` | - |
+| `Middleware` | `(Request, Next) → Result<Response>`; implemented for async closures | - |
+| `SessionStore` | where session data lives | in-memory |
+| `IdempotencyStore` | where idempotency keys and replays live | in-memory |
+| `TemplateEngine` | rendering | built-in engine |
 
-```rust
-#[async_trait]
-pub trait Handler: Send + Sync + 'static {
-    async fn call(&self, req: Request) -> Result<Response>;
-}
-```
+In-memory defaults are bounded (entry caps) and process-local; implement the trait for Redis or SQL to share state between instances.
 
-Automatically implemented for:
-- `Fn(Request) -> Future<Output = Result<Response>>`
-- Custom wrapper for path param extraction
+## Error handling
 
-### Middleware
+Handlers return `Result<Response, Error>`. `Error` maps to a status code (`BadRequest` 400 … `Validation` 422, `Custom(status, msg)`), and `Response::from_error` renders `{"error", "status"}` JSON (plus `fields` for validation). `ProblemDetails` rewrites that into RFC 9457. `ClientError` (outbound client) converts into `Error` with 502/504, so `?` works across service calls. A panic in a handler is caught by tokio's task boundary and ends only that connection.
 
-Inspired by Express.js middleware pattern.
+## Concurrency model
 
-```rust
-#[async_trait]
-pub trait Middleware: Send + Sync + 'static {
-    async fn handle(&self, req: Request, next: Next) -> Result<Response>;
-}
-```
+- One tokio task per connection; HTTP/2 multiplexes requests on it.
+- Shared state is `Arc`; handlers are `Send + Sync` and take `Request` by value.
+- Background work (`App::background`, `JobQueue`) gets a `Shutdown` signal; graceful shutdown stops accepting, drains requests and tasks for `shutdown_grace`, after an optional `shutdown_delay` during which readiness reports "draining".
+- Blocking or CPU-heavy work belongs in `spawn_blocking`; the framework never blocks the runtime itself.
 
-Middleware can:
-- Modify request before handler
-- Short-circuit with early response
-- Modify response after handler
-- Async I/O (logging, auth checks, etc.)
+## Testing strategy
 
-### Request/Response
+| Level | Tool |
+|-------|------|
+| Units | `#[cfg(test)]` in each module (parsers, stores, math) |
+| Pipeline | `testing::TestClient` - routing, middleware, cookies, no sockets |
+| Wire | `tests/common` spawns an `App` on port 0 and talks real HTTP (limits, timeouts, TLS, HTTP/2, WebSockets, streaming) |
+| Examples | every `examples/<name>` has `tests/example_<name>.rs` that includes its `app.rs` |
+| Performance | `benches/` (criterion) and `bench/` (cross-framework load test, see PERFORMANCE.md) |
 
-Type-safe wrappers around hyper types.
+## Design decisions
 
-**Request:**
-- Path parameters (`Params`)
-- Query parameters (`Query`)
-- JSON body parsing
-- Headers, method, URI
-
-**Response:**
-- Builder pattern for construction
-- JSON helper
-- Error→Response conversion
-
-## Type Safety
-
-### Path Parameters
-
-Path parameters are extracted at runtime but validated through the type system:
-
-```rust
-.get_with_params("/users/{id}", |params| async move {
-    let id: u64 = params.get("id")?.parse()
-        .map_err(|_| Error::bad_request("Invalid ID"))?;
-    // ...
-})
-```
-
-- `params.get()` returns `Result<&str, Error>`
-- Missing params → automatic 400 error
-- Type conversion failures caught and handled
-
-### Error Handling
-
-All handlers return `Result<Response, Error>`:
-
-```rust
-pub enum Error {
-    BadRequest(String),    // 400
-    Unauthorized(String),  // 401
-    Forbidden(String),     // 403
-    NotFound(String),      // 404
-    Internal(String),      // 500
-    Custom(u16, String),
-}
-```
-
-Errors automatically convert to appropriate HTTP responses with JSON body.
-
-## Performance Characteristics
-
-### Routing
-
-- **Method dispatch:** O(1) hash map lookup
-- **Path matching:** O(log n) via radix tree (matchit)
-- **Parameter extraction:** O(k) where k = number of params
-
-### Memory
-
-- **Handler storage:** Arc pointer per route (~8 bytes)
-- **Middleware:** Arc pointer per middleware (~8 bytes)
-- **Router:** Radix tree, ~32 bytes per node
-- **Request/Response:** Stack-allocated where possible
-
-### Concurrency
-
-- **Connection handling:** One tokio task per connection
-- **Shared state:** Arc for zero-copy sharing
-- **Thread safety:** All handlers are `Send + Sync`
-
-## Future Optimizations
-
-1. **Handler specialization:** Reduce trait object overhead
-2. **Request pooling:** Reuse Request allocations
-3. **Zero-copy body:** Stream large bodies without buffering
-4. **Compile-time routing:** Macro-based route generation
-
-## Design Decisions
-
-### Why matchit over custom router?
-
-- Battle-tested in production
-- Fast radix tree implementation
-- Active maintenance
-- Similar to Go's httprouter
-
-### Why not proc macros for routing?
-
-- Simpler to understand and debug
-- Faster compile times
-- More flexible at runtime
-- Can add later without breaking changes
-
-### Why Builder pattern over macros?
-
-- Familiar to Rust developers
-- Clear ownership and lifetimes
-- No hidden magic
-- Better IDE support
-
-### Why Arc<dyn Trait> over generics?
-
-- Simpler API surface
-- No generic explosion
-- Dynamic dispatch overhead is negligible for I/O-bound handlers
-- Easier to extend
-
-## Testing Strategy
-
-- **Unit tests:** Each module
-- **Integration tests:** Full HTTP round-trips
-- **Examples:** Serve as smoke tests
-- **No mocking:** Test against real hyper server
-
-## Dependencies
-
-Chosen for stability and minimalism:
-
-- `hyper` - HTTP server foundation
-- `tokio` - Async runtime
-- `matchit` - Fast routing
-- `serde/serde_json` - JSON handling
-- `async-trait` - Async trait syntax
-- `thiserror` - Error handling
-
-All dependencies are mature, actively maintained, and have minimal transitive dependencies.
+- **matchit** for routing: radix tree, parameters, catch-alls, maintained, used widely.
+- **Runtime state over proc macros**: routes are registered with plain method calls; compile times stay low and nothing is hidden.
+- **`Request` owns its body**: simple handlers by default (`req.json()`), with an explicit opt-in for streaming where memory matters.
+- **Middleware as a trait object chain** (`Arc<Vec<Arc<dyn Middleware>>>` plus an index): one allocation-free `Arc` clone and one boxed future per layer, measured at roughly 0.2 µs.
+- **Own small HTTP client** instead of a re-export: it shares the SSRF guard, tracing and error types with the server side.
+- **Deliberately not included**: an ORM, a config system, background-job persistence beyond the in-process queue, and an OpenTelemetry exporter.
