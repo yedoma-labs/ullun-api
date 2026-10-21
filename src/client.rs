@@ -356,6 +356,21 @@ impl RequestBuilder {
         self
     }
 
+    /// Continue the trace of the request being handled: sends `traceparent`
+    /// with the same trace id and this service's span as the callee's parent,
+    /// and passes `tracestate` on (needs [`TraceLayer`](crate::trace::TraceLayer);
+    /// does nothing without it)
+    pub fn trace(self, incoming: &crate::request::Request) -> Self {
+        let Some(ctx) = incoming.trace() else {
+            return self;
+        };
+        let this = self.header("traceparent", &ctx.traceparent());
+        match &ctx.tracestate {
+            Some(state) => this.header("tracestate", state),
+            None => this,
+        }
+    }
+
     /// Per-attempt timeout for this request only
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);

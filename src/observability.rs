@@ -143,6 +143,8 @@ pub struct LogEntry {
     pub bytes: Option<usize>,
     pub duration_ms: u128,
     pub request_id: Option<String>,
+    /// Trace id of [`TraceLayer`](crate::trace::TraceLayer), when installed
+    pub trace_id: Option<String>,
     pub user_agent: Option<String>,
 }
 
@@ -156,7 +158,7 @@ fn clean(s: &str, max: usize) -> String {
 
 impl LogEntry {
     fn text(&self) -> String {
-        format!(
+        let mut line = format!(
             "{} {} {} {} {} {} {}ms route={} id={} ua=\"{}\"",
             iso8601(self.time),
             self.remote.as_deref().unwrap_or("-"),
@@ -168,11 +170,16 @@ impl LogEntry {
             self.route.as_deref().unwrap_or("-"),
             self.request_id.as_deref().unwrap_or("-"),
             self.user_agent.as_deref().unwrap_or("-").replace('"', "'"),
-        )
+        );
+        if let Some(trace) = &self.trace_id {
+            line.push_str(" trace=");
+            line.push_str(trace);
+        }
+        line
     }
 
     fn json(&self) -> String {
-        serde_json::json!({
+        let mut entry = serde_json::json!({
             "time": iso8601(self.time),
             "remote": self.remote,
             "method": self.method,
@@ -183,8 +190,11 @@ impl LogEntry {
             "duration_ms": self.duration_ms as u64,
             "request_id": self.request_id,
             "user_agent": self.user_agent,
-        })
-        .to_string()
+        });
+        if let Some(trace) = &self.trace_id {
+            entry["trace_id"] = trace.clone().into();
+        }
+        entry.to_string()
     }
 }
 
@@ -268,6 +278,7 @@ impl Middleware for AccessLog {
             .and_then(|v| v.to_str().ok())
             .map(|v| clean(v, 200));
         let mut request_id = req.request_id().map(str::to_owned);
+        let trace_id = req.trace().map(|t| t.trace_id.clone());
 
         let result = next.run(req).await;
 
@@ -297,6 +308,7 @@ impl Middleware for AccessLog {
             bytes,
             duration_ms: started.elapsed().as_millis(),
             request_id,
+            trace_id,
             user_agent,
         };
         let line = match self.format {
@@ -560,6 +572,7 @@ mod tests {
             bytes: Some(12),
             duration_ms: 3,
             request_id: Some("rid".into()),
+            trace_id: None,
             user_agent: Some("curl \"x\"".into()),
         };
         assert_eq!(
