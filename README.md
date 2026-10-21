@@ -823,7 +823,7 @@ See [SECURITY.md](SECURITY.md) for comprehensive guidelines and best practices.
 - [x] Health probes, graceful shutdown with drain delay, connection and concurrency limits, response cache
 - [x] Request ids, access log, metrics, W3C trace context, outbound HTTP client, in-process `TestClient`
 - [x] Shared Redis stores for sessions, rate limits and idempotency keys (`redis` feature, zero dependencies)
-- [x] Cleartext HTTP/2 with prior knowledge (`App::h2c`)
+- [x] Cleartext HTTP/2 with prior knowledge (`App::h2c`) and HTTP/2 in the outbound client (ALPN on https, `http2_prior_knowledge` on http)
 - [x] RS256/ES256 JWTs and JWKS (`jwt-asymmetric` feature)
 - [x] Encrypted ("private") cookies (`encryption` feature)
 - [x] Portable benchmark against axum and actix-web (`scripts/bench.sh`)
@@ -831,7 +831,6 @@ See [SECURITY.md](SECURITY.md) for comprehensive guidelines and best practices.
 ### Ideas
 - [ ] OpenAPI schemas derived from types (needs a derive macro or `schemars`)
 - [ ] SQL-backed stores behind the same traits
-- [ ] HTTP/2 in the outbound client
 
 ## CI/CD
 

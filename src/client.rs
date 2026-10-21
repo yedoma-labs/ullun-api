@@ -13,7 +13,9 @@
 //!   target is another origin)
 //! * an SSRF guard ([`HttpClient::public_only`]): every connection, including
 //!   those after a redirect, goes to a vetted public address
-//! * HTTPS with the Mozilla root certificates (feature `client-tls`)
+//! * HTTPS with the Mozilla root certificates (feature `client-tls`), over
+//!   HTTP/2 when the server offers it (one multiplexed connection per host,
+//!   see [`HttpClient::http1_only`]); h2c with [`HttpClient::http2_prior_knowledge`]
 //!
 //! ```no_run
 //! use std::time::Duration;
@@ -40,8 +42,7 @@ use bytes::Bytes;
 use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri};
 use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
-use hyper::client::conn::http1::SendRequest;
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
 use serde::{de::DeserializeOwned, Serialize};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -106,7 +107,42 @@ impl From<ClientError> for crate::error::Error {
 trait Io: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> Io for T {}
 
-type Sender = SendRequest<Full<Bytes>>;
+/// One connection, speaking HTTP/1.1 (used by one request at a time) or
+/// HTTP/2 (cloned for every request, multiplexed)
+enum Sender {
+    H1(hyper::client::conn::http1::SendRequest<Full<Bytes>>),
+    H2(hyper::client::conn::http2::SendRequest<Full<Bytes>>),
+}
+
+impl Sender {
+    fn is_h2(&self) -> bool {
+        matches!(self, Sender::H2(_))
+    }
+
+    fn is_closed(&self) -> bool {
+        match self {
+            Sender::H1(s) => s.is_closed(),
+            Sender::H2(s) => s.is_closed(),
+        }
+    }
+
+    fn duplicate(&self) -> Option<Sender> {
+        match self {
+            Sender::H1(_) => None,
+            Sender::H2(s) => Some(Sender::H2(s.clone())),
+        }
+    }
+
+    async fn send(
+        &mut self,
+        req: http::Request<Full<Bytes>>,
+    ) -> Result<http::Response<Incoming>, hyper::Error> {
+        match self {
+            Sender::H1(s) => s.send_request(req).await,
+            Sender::H2(s) => s.send_request(req).await,
+        }
+    }
+}
 
 #[derive(Hash, PartialEq, Eq, Clone)]
 struct PoolKey {
@@ -122,8 +158,12 @@ struct Idle {
 
 struct Shared {
     pool: Mutex<HashMap<PoolKey, Vec<Idle>>>,
+    /// Offers `h2` and `http/1.1` through ALPN
     #[cfg(feature = "client-tls")]
     tls: tokio_rustls::TlsConnector,
+    /// Offers `http/1.1` only
+    #[cfg(feature = "client-tls")]
+    tls_h1: tokio_rustls::TlsConnector,
 }
 
 /// HTTP client, see the [module documentation](self). Cloning shares the connection pool.
@@ -141,6 +181,8 @@ pub struct HttpClient {
     headers: HeaderMap,
     idle_timeout: Duration,
     max_idle_per_host: usize,
+    http2: bool,
+    h2_prior_knowledge: bool,
 }
 
 impl Default for HttpClient {
@@ -155,7 +197,9 @@ impl HttpClient {
             shared: Arc::new(Shared {
                 pool: Mutex::new(HashMap::new()),
                 #[cfg(feature = "client-tls")]
-                tls: tls_connector(&[]).expect("default TLS configuration"),
+                tls: tls_connectors(&[]).expect("default TLS configuration").0,
+                #[cfg(feature = "client-tls")]
+                tls_h1: tls_connectors(&[]).expect("default TLS configuration").1,
             }),
             timeout: Duration::from_secs(30),
             connect_timeout: Duration::from_secs(10),
@@ -168,6 +212,8 @@ impl HttpClient {
             headers: HeaderMap::new(),
             idle_timeout: Duration::from_secs(30),
             max_idle_per_host: 8,
+            http2: true,
+            h2_prior_knowledge: false,
         }
     }
 
@@ -237,14 +283,31 @@ impl HttpClient {
         self
     }
 
+    /// Speak HTTP/1.1 only, even to servers that offer HTTP/2. By default `https`
+    /// connections negotiate HTTP/2 through ALPN (feature `client-tls`) and use
+    /// one multiplexed connection per host.
+    pub fn http1_only(mut self) -> Self {
+        self.http2 = false;
+        self
+    }
+
+    /// Speak HTTP/2 over plain `http://` connections without negotiation
+    /// ("prior knowledge", h2c), for services known to accept it. A server that
+    /// only knows HTTP/1.1 will fail the connection.
+    pub fn http2_prior_knowledge(mut self) -> Self {
+        self.h2_prior_knowledge = true;
+        self
+    }
+
     /// Trust these PEM root certificates in addition to the built-in ones, e.g.
     /// a private CA (feature `client-tls`)
     #[cfg(feature = "client-tls")]
     pub fn add_root_certificates_pem(mut self, pem: &[u8]) -> Result<Self, ClientError> {
-        let connector = tls_connector(&[pem])?;
+        let (tls, tls_h1) = tls_connectors(&[pem])?;
         let shared = Shared {
             pool: Mutex::new(HashMap::new()),
-            tls: connector,
+            tls,
+            tls_h1,
         };
         self.shared = Arc::new(shared);
         Ok(self)
@@ -498,23 +561,38 @@ impl HttpClient {
             .unwrap_or("/")
             .to_string();
 
-        let build = || -> Result<http::Request<Full<Bytes>>, ClientError> {
-            let mut b = http::Request::builder().method(method.clone()).uri(&path);
-            let h = b.headers_mut().expect("builder has headers");
+        let build = |h2: bool| -> Result<http::Request<Full<Bytes>>, ClientError> {
             let host_value = if (https && port == 443) || (!https && port == 80) {
                 host.clone()
             } else {
                 format!("{host}:{port}")
             };
-            h.insert(
-                http::header::HOST,
-                HeaderValue::from_str(&host_value)
-                    .map_err(|_| ClientError::InvalidUrl(uri.to_string()))?,
-            );
+            // HTTP/2 carries the authority in the request URI, not in a Host header
+            let target = if h2 {
+                format!(
+                    "{}://{host_value}{path}",
+                    if https { "https" } else { "http" }
+                )
+            } else {
+                path.clone()
+            };
+            let mut b = http::Request::builder().method(method.clone()).uri(target);
+            let h = b.headers_mut().expect("builder has headers");
+            if !h2 {
+                h.insert(
+                    http::header::HOST,
+                    HeaderValue::from_str(&host_value)
+                        .map_err(|_| ClientError::InvalidUrl(uri.to_string()))?,
+                );
+            }
             if let Ok(agent) = HeaderValue::from_str(&self.user_agent) {
                 h.insert(http::header::USER_AGENT, agent);
             }
             for (n, v) in self.headers.iter().chain(extra.iter()) {
+                // connection-specific headers are not allowed in HTTP/2 (RFC 9113, 8.2.2)
+                if h2 && is_connection_specific(n) {
+                    continue;
+                }
                 h.insert(n.clone(), v.clone());
             }
             if !body.is_empty() || matches!(*method, Method::POST | Method::PUT | Method::PATCH) {
@@ -527,11 +605,15 @@ impl HttpClient {
         // a pooled connection may have been closed by the peer meanwhile: one
         // fresh attempt is then always safe if nothing was received
         let mut sender = self.checkout(&key);
+        let mut from_pool = sender.is_some();
         let mut response = None;
         if let Some(s) = sender.as_mut() {
-            match s.send_request(build()?).await {
+            match s.send(build(s.is_h2())?).await {
                 Ok(r) => response = Some(r),
-                Err(_) => sender = None,
+                Err(_) => {
+                    sender = None;
+                    from_pool = false;
+                }
             }
         }
         let response = match response {
@@ -539,7 +621,7 @@ impl HttpClient {
             None => {
                 let mut fresh = self.connect(&key).await?;
                 let r = fresh
-                    .send_request(build()?)
+                    .send(build(fresh.is_h2())?)
                     .await
                     .map_err(|e| ClientError::Protocol(e.to_string()))?;
                 sender = Some(fresh);
@@ -549,17 +631,23 @@ impl HttpClient {
 
         let (parts, incoming) = response.into_parts();
         let bytes = read_limited(incoming, self.max_response).await?;
-        let keep = parts.version == http::Version::HTTP_11
-            && !parts
-                .headers
-                .get(http::header::CONNECTION)
-                .and_then(|v| v.to_str().ok())
-                .is_some_and(|v| v.eq_ignore_ascii_case("close"));
-        if let (true, Some(s)) = (keep, sender) {
-            self.checkin(key, s);
+        if let Some(s) = sender {
+            // an HTTP/2 connection stays in the pool (shared) once it is there
+            let keep = s.is_h2() && !from_pool
+                || (!s.is_h2()
+                    && parts.version == http::Version::HTTP_11
+                    && !parts
+                        .headers
+                        .get(http::header::CONNECTION)
+                        .and_then(|v| v.to_str().ok())
+                        .is_some_and(|v| v.eq_ignore_ascii_case("close")));
+            if keep {
+                self.checkin(key, s);
+            }
         }
         Ok(ClientResponse {
             status: parts.status,
+            version: parts.version,
             headers: parts.headers,
             body: bytes,
         })
@@ -568,6 +656,12 @@ impl HttpClient {
     fn checkout(&self, key: &PoolKey) -> Option<Sender> {
         let mut pool = self.shared.pool.lock().unwrap_or_else(|e| e.into_inner());
         let list = pool.get_mut(key)?;
+        list.retain(|i| !i.sender.is_closed());
+        // a shared HTTP/2 connection is lent out as a clone and stays
+        if let Some(idle) = list.iter_mut().find(|i| i.sender.is_h2()) {
+            idle.since = Instant::now();
+            return idle.sender.duplicate();
+        }
         while let Some(idle) = list.pop() {
             if !idle.sender.is_closed() && idle.since.elapsed() < self.idle_timeout {
                 return Some(idle.sender);
@@ -583,6 +677,10 @@ impl HttpClient {
         let mut pool = self.shared.pool.lock().unwrap_or_else(|e| e.into_inner());
         let list = pool.entry(key).or_default();
         list.retain(|i| !i.sender.is_closed() && i.since.elapsed() < self.idle_timeout);
+        // one HTTP/2 connection per host is enough; a racing second one is dropped
+        if sender.is_h2() && list.iter().any(|i| i.sender.is_h2()) {
+            return;
+        }
         if list.len() < self.max_idle_per_host {
             list.push(Idle {
                 sender,
@@ -630,18 +728,32 @@ impl HttpClient {
             }
             let tcp = connected.ok_or(ClientError::Connect(last))?;
             let _ = tcp.set_nodelay(true);
-            let io: Box<dyn Io> = if key.https {
+            let (io, h2): (Box<dyn Io>, bool) = if key.https {
                 self.tls(tcp, &key.host).await?
             } else {
-                Box::new(tcp)
+                (Box::new(tcp), self.h2_prior_knowledge)
             };
+            if h2 {
+                let (sender, conn) = hyper::client::conn::http2::Builder::new(TokioExecutor::new())
+                    .timer(TokioTimer::new())
+                    // notice peers that vanished without closing
+                    .keep_alive_interval(Duration::from_secs(30))
+                    .keep_alive_timeout(Duration::from_secs(20))
+                    .handshake(TokioIo::new(io))
+                    .await
+                    .map_err(|e| ClientError::Protocol(e.to_string()))?;
+                tokio::spawn(async move {
+                    let _ = conn.await;
+                });
+                return Ok::<_, ClientError>(Sender::H2(sender));
+            }
             let (sender, conn) = hyper::client::conn::http1::handshake(TokioIo::new(io))
                 .await
                 .map_err(|e| ClientError::Protocol(e.to_string()))?;
             tokio::spawn(async move {
                 let _ = conn.await;
             });
-            Ok::<_, ClientError>(sender)
+            Ok::<_, ClientError>(Sender::H1(sender))
         };
         tokio::time::timeout(self.connect_timeout, connect)
             .await
@@ -649,20 +761,24 @@ impl HttpClient {
     }
 
     #[cfg(feature = "client-tls")]
-    async fn tls(&self, tcp: TcpStream, host: &str) -> Result<Box<dyn Io>, ClientError> {
+    async fn tls(&self, tcp: TcpStream, host: &str) -> Result<(Box<dyn Io>, bool), ClientError> {
         let name = tokio_rustls::rustls::pki_types::ServerName::try_from(host.to_string())
             .map_err(|_| ClientError::Tls(format!("invalid server name {host}")))?;
-        let stream = self
-            .shared
-            .tls
+        let connector = if self.http2 {
+            &self.shared.tls
+        } else {
+            &self.shared.tls_h1
+        };
+        let stream = connector
             .connect(name, tcp)
             .await
             .map_err(|e| ClientError::Tls(e.to_string()))?;
-        Ok(Box::new(stream))
+        let h2 = stream.get_ref().1.alpn_protocol() == Some(b"h2");
+        Ok((Box::new(stream), h2))
     }
 
     #[cfg(not(feature = "client-tls"))]
-    async fn tls(&self, _tcp: TcpStream, _host: &str) -> Result<Box<dyn Io>, ClientError> {
+    async fn tls(&self, _tcp: TcpStream, _host: &str) -> Result<(Box<dyn Io>, bool), ClientError> {
         Err(ClientError::Tls(
             "https needs the `client-tls` feature of ullun-api".into(),
         ))
@@ -670,7 +786,9 @@ impl HttpClient {
 }
 
 #[cfg(feature = "client-tls")]
-fn tls_connector(extra_pem: &[&[u8]]) -> Result<tokio_rustls::TlsConnector, ClientError> {
+fn tls_connectors(
+    extra_pem: &[&[u8]],
+) -> Result<(tokio_rustls::TlsConnector, tokio_rustls::TlsConnector), ClientError> {
     use tokio_rustls::rustls::pki_types::pem::PemObject;
     use tokio_rustls::rustls::pki_types::CertificateDer;
     use tokio_rustls::rustls::{ClientConfig, RootCertStore};
@@ -697,8 +815,21 @@ fn tls_connector(extra_pem: &[&[u8]]) -> Result<tokio_rustls::TlsConnector, Clie
     .map_err(|e| ClientError::Tls(e.to_string()))?
     .with_root_certificates(roots)
     .with_no_client_auth();
-    config.alpn_protocols = vec![b"http/1.1".to_vec()];
-    Ok(tokio_rustls::TlsConnector::from(Arc::new(config)))
+    let mut http1_only = config.clone();
+    http1_only.alpn_protocols = vec![b"http/1.1".to_vec()];
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    Ok((
+        tokio_rustls::TlsConnector::from(Arc::new(config)),
+        tokio_rustls::TlsConnector::from(Arc::new(http1_only)),
+    ))
+}
+
+/// Headers HTTP/2 forbids (they describe the HTTP/1 connection)
+fn is_connection_specific(name: &HeaderName) -> bool {
+    matches!(
+        name.as_str(),
+        "connection" | "keep-alive" | "proxy-connection" | "transfer-encoding" | "upgrade" | "host"
+    )
 }
 
 async fn read_limited(mut body: Incoming, max: usize) -> Result<Bytes, ClientError> {
@@ -766,11 +897,17 @@ fn resolve_location(base: &Uri, location: &str) -> Option<String> {
 #[derive(Debug, Clone)]
 pub struct ClientResponse {
     status: StatusCode,
+    version: http::Version,
     headers: HeaderMap,
     body: Bytes,
 }
 
 impl ClientResponse {
+    /// The HTTP version the response arrived with (`HTTP_2` on an HTTP/2 connection)
+    pub fn version(&self) -> http::Version {
+        self.version
+    }
+
     pub fn status(&self) -> u16 {
         self.status.as_u16()
     }
