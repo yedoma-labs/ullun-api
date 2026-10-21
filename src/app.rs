@@ -37,6 +37,8 @@ pub struct App {
     max_connections: Option<usize>,
     max_connections_per_ip: Option<usize>,
     trusted_proxies: Option<Arc<crate::proxy::TrustedProxies>>,
+    fallback: Option<DynHandler>,
+    catch_panics: bool,
     #[cfg(feature = "tls")]
     tls: Option<crate::tls::TlsConfig>,
     #[cfg(feature = "tls")]
@@ -60,6 +62,8 @@ struct Shared {
     body_limits: Vec<(String, Option<usize>)>,
     stream_bodies: Vec<(String, Option<u64>)>,
     trusted_proxies: Option<Arc<crate::proxy::TrustedProxies>>,
+    fallback: Option<DynHandler>,
+    catch_panics: bool,
     state: Arc<StateMap>,
     shutdown: Shutdown,
     header_read_timeout: Option<Duration>,
@@ -94,6 +98,8 @@ impl App {
             max_connections: None,
             max_connections_per_ip: None,
             trusted_proxies: None,
+            fallback: None,
+            catch_panics: true,
             #[cfg(feature = "tls")]
             tls: None,
             #[cfg(feature = "tls")]
@@ -229,6 +235,36 @@ impl App {
     /// `Request::is_secure()` honours `X-Forwarded-Proto` from them
     pub fn trusted_proxies(mut self, proxies: crate::proxy::TrustedProxies) -> Self {
         self.trusted_proxies = Some(Arc::new(proxies));
+        self
+    }
+
+    /// Answer requests to unknown paths with this handler instead of the plain
+    /// `404` JSON error: a custom not-found page, a single-page app's
+    /// `index.html`, a proxy to another service. It runs inside the middleware
+    /// chain like any route. A known path used with the wrong method still gets
+    /// `405` with `Allow`.
+    ///
+    /// ```
+    /// use ullun::prelude::*;
+    /// let app = App::new().fallback(|req: Request| async move {
+    ///     Ok(Response::html(format!("<h1>No page at {}</h1>", req.uri.path()))
+    ///         .with_status(http::StatusCode::NOT_FOUND))
+    /// });
+    /// # let _ = app;
+    /// ```
+    pub fn fallback<H>(mut self, handler: H) -> Self
+    where
+        H: Handler,
+    {
+        self.fallback = Some(Arc::new(handler) as DynHandler);
+        self
+    }
+
+    /// Turn a panic in a handler into a `500` response (default: on). The
+    /// panic is logged, the connection stays usable and middleware still sees
+    /// the response. With `false` the panic ends the connection instead.
+    pub fn catch_panics(mut self, enabled: bool) -> Self {
+        self.catch_panics = enabled;
         self
     }
 
@@ -661,6 +697,8 @@ impl App {
             body_limits: self.body_limits,
             stream_bodies: self.stream_bodies,
             trusted_proxies: self.trusted_proxies,
+            fallback: self.fallback,
+            catch_panics: self.catch_panics,
             state: Arc::new(self.state),
             shutdown,
             header_read_timeout: self.header_read_timeout,
@@ -1047,19 +1085,24 @@ async fn run_pipeline(mut request: Request, conn: &ConnInfo, shared: &Shared) ->
             request.matched_path = Some(pattern);
             Route::Found(handler)
         }
-        Err(_) => Route::Miss {
-            allow: router.allowed_methods(&path),
-        },
+        Err(_) => {
+            let allow = router.allowed_methods(&path);
+            match (&shared.fallback, allow.is_empty()) {
+                (Some(handler), true) => Route::Found(handler.clone()),
+                _ => Route::Miss { allow },
+            }
+        }
     };
+    let catch = shared.catch_panics;
 
     let result = if middlewares.is_empty() {
-        dispatch(route, request).await
+        dispatch(route, request, catch).await
     } else {
         // Route handler (or the miss) runs as the last link of the chain
         let mut chain = middlewares.to_vec();
         let final_handler = Arc::new(move |req: Request, _next: Next| {
             let route = route.clone();
-            async move { dispatch(route, req).await }
+            async move { dispatch(route, req, catch).await }
         });
         chain.push(final_handler as Arc<dyn Middleware>);
 
@@ -1194,8 +1237,9 @@ enum Route {
     },
 }
 
-async fn dispatch(route: Route, req: Request) -> Result<Response> {
+async fn dispatch(route: Route, req: Request, catch: bool) -> Result<Response> {
     match route {
+        Route::Found(handler) if catch => CatchPanic(handler.call(req)).await,
         Route::Found(handler) => handler.call(req).await,
         Route::Miss { allow } if allow.is_empty() => Err(Error::not_found("Route not found")),
         Route::Miss { allow } => {
@@ -1209,6 +1253,39 @@ async fn dispatch(route: Route, req: Request) -> Result<Response> {
                     Response::from_error(Error::custom(405, "Method not allowed"))
                         .with_header("allow", allow),
                 )
+            }
+        }
+    }
+}
+
+/// Polls a handler future and reports a panic as an error instead of unwinding
+/// into the connection task
+struct CatchPanic<F>(F);
+
+impl<F> std::future::Future for CatchPanic<F>
+where
+    F: std::future::Future<Output = Result<Response>> + Unpin,
+{
+    type Output = Result<Response>;
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let inner = &mut self.0;
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            std::pin::Pin::new(inner).poll(cx)
+        })) {
+            Ok(poll) => poll,
+            Err(payload) => {
+                let what = payload
+                    .downcast_ref::<&str>()
+                    .map(|s| s.to_string())
+                    .or_else(|| payload.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "unknown panic".into());
+                eprintln!("Handler panicked: {what}");
+                // the message stays in the log, the client gets nothing internal
+                std::task::Poll::Ready(Err(Error::internal("Internal server error")))
             }
         }
     }

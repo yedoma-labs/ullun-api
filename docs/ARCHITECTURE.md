@@ -99,7 +99,7 @@ In-memory defaults are bounded (entry caps) and process-local; implement the tra
 
 ## Error handling
 
-Handlers return `Result<Response, Error>`. `Error` maps to a status code (`BadRequest` 400 … `Validation` 422, `Custom(status, msg)`), and `Response::from_error` renders `{"error", "status"}` JSON (plus `fields` for validation). `ProblemDetails` rewrites that into RFC 9457. `ClientError` (outbound client) converts into `Error` with 502/504, so `?` works across service calls. A panic in a handler is caught by tokio's task boundary and ends only that connection.
+Handlers return `Result<Response, Error>`. `Error` maps to a status code (`BadRequest` 400 … `Validation` 422, `Custom(status, msg)`), and `Response::from_error` renders `{"error", "status"}` JSON (plus `fields` for validation). `ProblemDetails` rewrites that into RFC 9457. `ClientError` (outbound client) converts into `Error` with 502/504, so `?` works across service calls. A panic in a handler is caught around the handler call (`App::catch_panics`, on by default), logged, and answered with a generic `500` that middleware still sees; with it off the panic ends only that connection. `App::fallback` replaces the plain 404 for unknown paths.
 
 ## Concurrency model
 

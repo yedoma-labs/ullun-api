@@ -57,7 +57,7 @@ async fn main() {
 **Core**
 - 🚀 Built on hyper + tokio, measured numbers in [PERFORMANCE.md](docs/PERFORMANCE.md), reproducible against axum and actix-web with `scripts/bench.sh`
 - 🎯 Express-style routing and `(req, next)` middleware, route groups with group-level middleware, `async fn(Request) -> Result<Response>` handlers
-- 🔒 Typed query/form/JSON extraction, `Validator` with 422 responses, `Error` that maps to status codes
+- 🔒 Typed query/form/JSON extraction, `App::fallback` for unknown paths, panics in handlers become a logged `500` (the connection survives), `Validator` with 422 responses, `Error` that maps to status codes
 - 🍪 Cookies, forms, multipart uploads, [templates](#templates) (dependency-free engine or your own), static files
 - 📖 OpenAPI 3.1 generated from your routes, optional Swagger UI
 - 🔌 Server-sent events, streaming responses, WebSockets (`websocket` feature), pub/sub `Hub`, background `JobQueue`
