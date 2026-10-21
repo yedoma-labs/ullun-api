@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.9](https://github.com/yedoma-labs/ullun-api/compare/v0.4.8...v0.4.9) - 2026-10-21
+
+### Added
+
+- *(problem)* add RFC 9457 problem details and content negotiation
+
+### Other
+
+- *(bench)* add middleware benchmark and commit webpki-roots lock entry
+- *(response)* move validated headers into the hyper response
+
 ## [0.4.8](https://github.com/yedoma-labs/ullun-api/compare/v0.4.7...v0.4.8) - 2026-10-21
 
 ### Added
