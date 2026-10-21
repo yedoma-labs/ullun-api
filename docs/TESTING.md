@@ -61,6 +61,7 @@ tests/
 ├── example_gateway.rs    #   (real upstream servers, failover, streaming relay)
 ├── observability_test.rs # Request ids, access log, metrics
 ├── example_blog.rs       #   (browser-like: cookie jar, CSRF tokens scraped from HTML)
+├── health_test.rs        # Liveness/readiness probes, shutdown drain phase
 ├── testing_test.rs       # The in-process TestClient
 ├── cache_test.rs         # Response cache: hits, coalescing, stale-while-revalidate, bypass rules
 ├── cors_test.rs          # CORS (origins, preflight, Vary, credentials) and security headers / CSP nonce

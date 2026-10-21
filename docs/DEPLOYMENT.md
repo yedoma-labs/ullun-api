@@ -281,10 +281,16 @@ spec:
           value: "0.0.0.0"
         - name: PORT
           value: "3000"
+        livenessProbe:
+          httpGet: { path: /livez, port: 3000 }
+        readinessProbe:
+          httpGet: { path: /readyz, port: 3000 }
+          periodSeconds: 2
         resources:
           limits:
             memory: "128Mi"
             cpu: "500m"
+      terminationGracePeriodSeconds: 30
 ---
 apiVersion: v1
 kind: Service
@@ -298,6 +304,25 @@ spec:
     targetPort: 3000
   type: LoadBalancer
 ```
+
+#### Probes and zero-downtime rollouts
+
+```rust
+use ullun::health::Health;
+
+let health = Health::new().check("database", || async { pool.ping().await });
+App::new()
+    .get("/livez", health.liveness())    // never touches dependencies
+    .get("/readyz", health.readiness())  // 503 when a critical check fails or while draining
+    .shutdown_delay(Duration::from_secs(5)) // keep serving after SIGTERM while readiness says 503
+    .shutdown_grace(Duration::from_secs(20)) // then let in-flight requests finish
+```
+
+On SIGTERM the instance first reports "not ready" for `shutdown_delay`, so the
+endpoints controller removes it from the Service while it still answers; only
+then does it stop accepting connections and drain. Choose a delay a bit above the
+readiness `periodSeconds`, and keep `terminationGracePeriodSeconds` above
+`shutdown_delay + shutdown_grace`.
 
 ## Monitoring
 

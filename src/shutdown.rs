@@ -15,11 +15,19 @@ use tokio::sync::watch;
 #[derive(Clone)]
 pub struct Shutdown {
     rx: watch::Receiver<bool>,
+    drain: watch::Receiver<bool>,
 }
 
 impl Shutdown {
     pub(crate) fn new(rx: watch::Receiver<bool>) -> Self {
-        Self { rx }
+        // no separate drain phase: draining begins together with shutdown
+        let (tx, drain) = watch::channel(false);
+        std::mem::forget(tx);
+        Self { rx, drain }
+    }
+
+    pub(crate) fn with_drain(rx: watch::Receiver<bool>, drain: watch::Receiver<bool>) -> Self {
+        Self { rx, drain }
     }
 
     /// A signal that never fires (requests built outside a running server)
@@ -27,7 +35,15 @@ impl Shutdown {
         let (tx, rx) = watch::channel(false);
         // keep the sender alive for the process lifetime so `wait` pends instead of erroring
         std::mem::forget(tx);
-        Self { rx }
+        Self::new(rx)
+    }
+
+    /// True once the server was told to stop, which is up to
+    /// `App::shutdown_delay` before [`is_triggered`](Shutdown::is_triggered).
+    /// Readiness checks report "not ready" from here on so load balancers stop
+    /// sending traffic while the server still answers.
+    pub fn is_draining(&self) -> bool {
+        *self.drain.borrow() || self.is_triggered()
     }
 
     /// True once shutdown has begun
@@ -129,6 +145,25 @@ mod tests {
             .await
             .unwrap()
             .unwrap());
+    }
+
+    #[test]
+    fn draining_precedes_or_equals_shutdown() {
+        let (tx, rx) = watch::channel(false);
+        let (dtx, drx) = watch::channel(false);
+        let s = Shutdown::with_drain(rx, drx);
+        assert!(!s.is_draining());
+        dtx.send(true).unwrap();
+        assert!(s.is_draining() && !s.is_triggered());
+        tx.send(true).unwrap();
+        assert!(s.is_triggered());
+
+        // without a drain phase, draining starts with shutdown
+        let (tx, rx) = watch::channel(false);
+        let s = Shutdown::new(rx);
+        assert!(!s.is_draining());
+        tx.send(true).unwrap();
+        assert!(s.is_draining());
     }
 
     #[tokio::test]

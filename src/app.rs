@@ -30,6 +30,7 @@ pub struct App {
     state: StateMap,
     background: Vec<BackgroundTask>,
     shutdown_grace: Duration,
+    shutdown_delay: Duration,
     body_limits: Vec<(String, Option<usize>)>,
     header_read_timeout: Option<Duration>,
     max_connections: Option<usize>,
@@ -82,6 +83,7 @@ impl App {
             state: StateMap::default(),
             background: Vec::new(),
             shutdown_grace: Duration::from_secs(10),
+            shutdown_delay: Duration::ZERO,
             body_limits: Vec::new(),
             header_read_timeout: Some(Duration::from_secs(30)),
             max_connections: None,
@@ -213,6 +215,17 @@ impl App {
     /// (default 10 seconds)
     pub fn shutdown_grace(mut self, grace: Duration) -> Self {
         self.shutdown_grace = grace;
+        self
+    }
+
+    /// Keep serving normally for this long after the stop signal before
+    /// refusing connections (default none). Readiness checks
+    /// ([`Health::readiness`](crate::health::Health::readiness)) answer `503`
+    /// during this time, so a load balancer or Kubernetes stops routing to the
+    /// instance first and no request is cut off; set it a little above the
+    /// balancer's probe interval.
+    pub fn shutdown_delay(mut self, delay: Duration) -> Self {
+        self.shutdown_delay = delay;
         self
     }
 
@@ -482,6 +495,7 @@ impl App {
     ) -> Result<()> {
         self = self.finalize();
         let grace = self.shutdown_grace;
+        let delay = self.shutdown_delay;
         let background = std::mem::take(&mut self.background);
         #[cfg(feature = "tls")]
         let tls = self.tls.take();
@@ -489,7 +503,8 @@ impl App {
         let tls_reload = self.tls_reload;
         let conn_limits = ConnLimits::new(self.max_connections, self.max_connections_per_ip);
         let (trigger, rx) = tokio::sync::watch::channel(false);
-        let shutdown = Shutdown::new(rx);
+        let (drain_tx, drain_rx) = tokio::sync::watch::channel(false);
+        let shutdown = Shutdown::with_drain(rx, drain_rx);
         let shared = Arc::new(self.into_shared(shutdown.clone()));
 
         #[allow(unused_mut)]
@@ -521,9 +536,17 @@ impl App {
         // every connection holds a clone; the channel closes when all are done
         let (done_tx, mut done_rx) = tokio::sync::mpsc::channel::<()>(1);
         tokio::pin!(signal);
+        let mut stop_at: Option<tokio::time::Instant> = None;
         loop {
             tokio::select! {
-                _ = &mut signal => break,
+                _ = &mut signal, if stop_at.is_none() => {
+                    let _ = drain_tx.send(true);
+                    if delay.is_zero() {
+                        break;
+                    }
+                    stop_at = Some(tokio::time::Instant::now() + delay);
+                }
+                _ = tokio::time::sleep_until(stop_at.unwrap_or_else(tokio::time::Instant::now)), if stop_at.is_some() => break,
                 accepted = listener.accept() => match accepted {
                     Ok((stream, peer)) => {
                         let Some(guard) = conn_limits.admit(peer.ip()) else {
