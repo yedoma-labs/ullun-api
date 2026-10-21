@@ -66,6 +66,7 @@ async fn main() {
 - **📝 Forms:** `application/x-www-form-urlencoded` into typed structs
 - **🖼️ Templates:** Built-in dependency-free engine, or plug in your own via `TemplateEngine`
 - **🚦 Rate limiting:** In-memory middleware with `429` / `retry-after`
+- **🗂️ SPA-ready static files:** `serve_static_with` serves precompressed `.br`/`.gz` variants, marks hashed assets `immutable` and falls back to `index.html` for client-side routes
 - **📤 Streaming uploads:** `App::stream_body` + `Request::body_stream()` read multi-GB bodies piece by piece (`save_to`, limit enforced while it arrives) instead of buffering them
 - **🔗 Trace context:** W3C `traceparent` / `tracestate` via `TraceLayer`, `Request::trace()`, `HttpClient::trace(&req)` and trace ids in the access log
 - **🌐 HTTP client:** `HttpClient` with timeouts, pooling, retries with backoff (only when safe), redirects, response caps and an SSRF guard (`public_only`)
@@ -264,6 +265,18 @@ App::new()
     .serve_static("/assets", "dist")    // Serve from 'dist' at /assets
     .run("127.0.0.1:3000")
     .await?;
+```
+
+A single-page app built by a bundler:
+
+```rust
+use ullun::static_files::StaticOptions;
+
+App::new()
+    .serve_static_with("/", "dist", StaticOptions::new()
+        .precompressed()              // app.js.br / app.js.gz next to app.js, chosen by Accept-Encoding
+        .immutable_dir("assets")      // cached for a year, never revalidated
+        .spa_fallback("index.html"))  // browser navigations to /orders/17 get index.html
 ```
 
 ### Body Size Limits (v0.2.0)
