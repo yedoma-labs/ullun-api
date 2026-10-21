@@ -24,8 +24,10 @@ exclude = [
 
 [features]
 default = []
+# HMAC-SHA256 signing: signed cookies
+signing = ["dep:hmac", "dep:sha2", "dep:base64"]
 # HS256 JSON Web Tokens and a bearer-auth middleware
-jwt = ["dep:hmac", "dep:sha2", "dep:base64"]
+jwt = ["signing"]
 # gzip response compression middleware
 compression = ["dep:flate2"]
 # WebSocket upgrades (App::ws)
@@ -34,7 +36,7 @@ websocket = ["dep:tokio-tungstenite", "dep:futures-util"]
 tls = ["dep:tokio-rustls"]
 # outbound HTTPS for ullun::client (rustls + Mozilla root certificates)
 client-tls = ["dep:tokio-rustls", "dep:webpki-roots"]
-full = ["jwt", "compression", "websocket", "tls", "client-tls"]
+full = ["jwt", "signing", "compression", "websocket", "tls", "client-tls"]
 
 [package.metadata.docs.rs]
 all-features = true
