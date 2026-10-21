@@ -50,6 +50,7 @@ tests/
 ├── static_files_test.rs  # Static serving, index files, traversal (ephemeral port)
 ├── common/mod.rs         # spawn(app) + fluent HTTP client for tests
 ├── state_test.rs         # Shared application state
+├── example_production.rs # Production skeleton: the middleware stack composed
 ├── example_orders.rs     # Checkout API (CORS, idempotency, limits)
 ├── example_shortener.rs  # Real-world example apps, run over real HTTP
 ├── example_pastebin.rs   #   (the app modules are included with #[path])

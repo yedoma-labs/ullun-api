@@ -83,6 +83,8 @@ Middleware wraps from the outside in: the first registered runs first on the way
 5. `SessionLayer`, `Csrf`, `JwtAuth` - identity
 6. `Idempotency`, `ResponseCache`, `Compression`, `ETags` - per-route behaviour (use groups to scope them)
 
+`examples/production` wires this order end to end and is tested as a whole.
+
 Middleware also runs for unmatched routes (404/405/OPTIONS), so CORS preflights and request ids work without a route.
 
 ## Extension points
