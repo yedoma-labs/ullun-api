@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.11](https://github.com/yedoma-labs/ullun-api/compare/v0.4.10...v0.4.11) - 2026-10-21
+
+### Added
+
+- *(upload)* add streaming request bodies for large uploads
+- *(trace)* add W3C trace context propagation
+
 ## [0.4.10](https://github.com/yedoma-labs/ullun-api/compare/v0.4.9...v0.4.10) - 2026-10-21
 
 ### Added
