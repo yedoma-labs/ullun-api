@@ -830,8 +830,36 @@ See [SECURITY.md](SECURITY.md) for comprehensive guidelines and best practices.
 - [x] Encrypted ("private") cookies (`encryption` feature)
 - [x] Portable benchmark against axum and actix-web (`scripts/bench.sh`)
 
-### Ideas
-- [ ] SQL-backed stores behind the same traits
+### Custom stores (SQL, ...)
+
+Sessions, rate limits and idempotency keys keep their state behind three small traits: `SessionStore`, `RateLimitStore` and `IdempotencyStore`. The Redis stores (feature `redis`) are one implementation; a SQL database is another. ullun-api ships none so that it does not pick a database library for you. A session store on top of your own pool looks like this:
+
+```rust,ignore
+use async_trait::async_trait;
+use ullun::session::{SessionRecord, SessionStore};
+
+struct PgSessions(sqlx::PgPool);
+
+#[async_trait]
+impl SessionStore for PgSessions {
+    async fn load(&self, id: &str) -> Option<SessionRecord> {
+        // SELECT data, created_at, last_seen FROM sessions WHERE id = $1 AND expires_at > now()
+        todo!()
+    }
+    async fn save(&self, id: &str, record: &SessionRecord) {
+        // INSERT ... ON CONFLICT (id) DO UPDATE, with an expires_at column
+        todo!()
+    }
+    async fn delete(&self, id: &str) {
+        // DELETE FROM sessions WHERE id = $1
+        todo!()
+    }
+}
+
+// App::new().middleware(SessionLayer::with_store(PgSessions(pool)))
+```
+
+Remember to expire old rows, and with a store shared between instances set `Idempotency::shared_seed`.
 
 ## CI/CD
 
