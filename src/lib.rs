@@ -44,6 +44,7 @@ pub mod csrf;
 pub mod error;
 pub mod files;
 pub mod handler;
+pub mod health;
 pub mod hub;
 pub mod idempotency;
 pub mod jobs;
