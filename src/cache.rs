@@ -47,7 +47,8 @@
 //! # }
 //! ```
 //!
-//! The cache lives in the memory of one process. A request that is not
+//! Keys longer than 2 KiB are never cached. Memory use is bounded by
+//! `max_entries` x `max_body` (1000 x 1 MiB by default): lower either for large responses. The cache lives in the memory of one process. A request that is not
 //! cacheable (see above) is not coalesced either: each waiter then runs the
 //! handler itself.
 
@@ -63,6 +64,9 @@ use std::hash::{BuildHasher, Hash, Hasher};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
+
+/// Longest cache key (path, query and varied headers) that is stored
+const MAX_KEY_LEN: usize = 2048;
 
 struct Stored {
     status: StatusCode,
@@ -427,6 +431,10 @@ impl Middleware for ResponseCache {
             return next.run(req).await;
         }
         let key = self.key(&req, credentialed);
+        if key.len() > MAX_KEY_LEN {
+            // keys are kept in memory: a request cannot make us hold a huge one
+            return next.run(req).await;
+        }
         let path = req.uri.path().to_string();
         let finish = |mut res: Response| {
             for v in &self.vary {

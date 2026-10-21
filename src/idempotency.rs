@@ -11,8 +11,8 @@
 //!   with `Idempotency-Replayed: true`, the handler does not run again
 //! * retry while the first is still running: `409 Conflict` + `Retry-After`
 //! * same key, different payload (method, path, query or body): `422`
-//! * a `5xx`, a streaming response or a handler that was cancelled releases the
-//!   key, so a retry can try again
+//! * a `5xx`, a streaming response, a body over [`Idempotency::max_response_bytes`]
+//!   or a handler that was cancelled releases the key, so a retry can try again
 //!
 //! Keys are scoped to the caller: by default to the `Authorization` and `Cookie`
 //! headers, so one user cannot replay (and read) another user's response.
@@ -104,12 +104,12 @@ pub struct MemoryStore {
 
 impl Default for MemoryStore {
     fn default() -> Self {
-        Self::new(100_000)
+        Self::new(10_000)
     }
 }
 
 impl MemoryStore {
-    /// Keep at most `max_entries` keys; when full of live keys new ones are refused (`503`)
+    /// Keep at most `max_entries` keys (default 10 000); when full of live keys new ones are refused (`503`)
     pub fn new(max_entries: usize) -> Self {
         Self {
             entries: Mutex::new(HashMap::new()),
@@ -180,6 +180,7 @@ pub struct Idempotency {
     methods: Vec<Method>,
     ttl: Duration,
     lock_ttl: Duration,
+    max_response: usize,
     required: bool,
     scope: Arc<ScopeFn>,
     hasher: std::collections::hash_map::RandomState,
@@ -206,6 +207,7 @@ impl Idempotency {
             methods: vec![Method::POST, Method::PATCH],
             ttl: Duration::from_secs(24 * 3600),
             lock_ttl: Duration::from_secs(60),
+            max_response: 256 * 1024,
             required: false,
             scope: Arc::new(move |req| {
                 let mut h = scope_hasher.build_hasher();
@@ -234,6 +236,13 @@ impl Idempotency {
     /// How long a running request blocks retries if it never finishes (default 60 seconds)
     pub fn lock_ttl(mut self, lock_ttl: Duration) -> Self {
         self.lock_ttl = lock_ttl;
+        self
+    }
+
+    /// Largest response body that is kept for replay (default 256 KiB). Larger
+    /// responses are sent normally but not stored, so a retry runs the handler again.
+    pub fn max_response_bytes(mut self, max: usize) -> Self {
+        self.max_response = max;
         self
     }
 
@@ -354,7 +363,8 @@ impl Middleware for Idempotency {
             armed: true,
         };
         let res = next.run(req).await.unwrap_or_else(Response::from_error);
-        if res.status.is_server_error() || res.is_streaming() {
+        if res.status.is_server_error() || res.is_streaming() || res.body.len() > self.max_response
+        {
             return Ok(res); // claim drops armed: released for a retry
         }
         claim.armed = false;
