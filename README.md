@@ -320,7 +320,7 @@ App::new()
 App::new().middleware(RequireHttps::new().https_port(8443)).run("0.0.0.0:8080").await?;
 ```
 
-TLS 1.2/1.3 via rustls (ring), handshakes with a timeout, a broken renewal keeps the old certificate in service, WebSockets work as `wss`. `req.is_secure()` tells handlers how the request arrived; behind a TLS-terminating proxy use `trust_forwarded_proto()` on `RequireHttps` / `Hsts` (only if the proxy overwrites `X-Forwarded-Proto`).
+TLS 1.2/1.3 via rustls (ring), **HTTP/2 negotiated through ALPN** (multiplexed requests, up to 128 concurrent streams per connection, dead peers dropped by keep-alive pings; HTTP/1.1 clients keep working on the same port), handshakes with a timeout, a broken renewal keeps the old certificate in service, WebSockets work as `wss`. `req.is_secure()` tells handlers how the request arrived; behind a TLS-terminating proxy use `trust_forwarded_proto()` on `RequireHttps` / `Hsts` (only if the proxy overwrites `X-Forwarded-Proto`).
 
 ### Background jobs
 

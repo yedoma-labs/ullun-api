@@ -16,7 +16,8 @@
 //! # }
 //! ```
 //!
-//! * TLS 1.2 and 1.3 with rustls (ring provider), `http/1.1` via ALPN.
+//! * TLS 1.2 and 1.3 with rustls (ring provider); ALPN offers `h2` and `http/1.1`,
+//!   so clients that speak HTTP/2 get it automatically.
 //! * **Reload without restart**: [`TlsConfig::reload`] re-reads the certificate
 //!   files; new connections use the new certificate, open ones keep running. A
 //!   renewal that fails to load (half-written file, wrong key) is reported and
@@ -118,7 +119,7 @@ fn build_server_config(
     let mut config = builder
         .with_single_cert(chain, key)
         .map_err(|e| tls_error("certificate and key do not match", e))?;
-    config.alpn_protocols = vec![b"http/1.1".to_vec()];
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
     Ok(config)
 }
 
@@ -236,12 +237,12 @@ impl TlsConfig {
         Ok(true)
     }
 
-    /// Perform the handshake; returns the stream and the DER of the client's
-    /// leaf certificate, if it presented one
+    /// Perform the handshake; returns the stream, the DER of the client's
+    /// leaf certificate if it presented one, and whether the client chose HTTP/2
     pub(crate) async fn accept(
         &self,
         stream: TcpStream,
-    ) -> std::io::Result<(TlsStream<TcpStream>, Option<Vec<u8>>)> {
+    ) -> std::io::Result<(TlsStream<TcpStream>, Option<Vec<u8>>, bool)> {
         let acceptor = self.lock().acceptor.clone();
         let tls = tokio::time::timeout(self.handshake_timeout, acceptor.accept(stream))
             .await
@@ -254,7 +255,8 @@ impl TlsConfig {
             .peer_certificates()
             .and_then(|c| c.first())
             .map(|c| c.as_ref().to_vec());
-        Ok((tls, cert))
+        let h2 = tls.get_ref().1.alpn_protocol() == Some(b"h2");
+        Ok((tls, cert, h2))
     }
 }
 
