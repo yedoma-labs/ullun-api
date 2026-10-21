@@ -75,6 +75,7 @@ pub mod testing;
 #[cfg(feature = "tls")]
 pub mod tls;
 pub mod trace;
+pub mod upload;
 pub mod validate;
 #[cfg(feature = "websocket")]
 pub mod websocket;

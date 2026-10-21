@@ -163,6 +163,7 @@ pub struct Request {
     pub secure: bool,
     pub(crate) state: Option<std::sync::Arc<StateMap>>,
     pub(crate) shutdown: Option<crate::shutdown::Shutdown>,
+    pub(crate) stream: Option<crate::upload::BodyStream>,
     cookies: OnceLock<Cookies>,
 }
 
@@ -191,6 +192,7 @@ impl Request {
             secure: false,
             state: None,
             shutdown: None,
+            stream: None,
             cookies: OnceLock::new(),
         }
     }
@@ -214,6 +216,16 @@ impl Request {
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
         crate::negotiate::best_language(header, offered)
+    }
+
+    /// The body as a stream, see [`crate::upload`]. On routes registered with
+    /// `App::stream_body` nothing was buffered; on other routes the already
+    /// buffered body is served as a single chunk, so a handler works either way.
+    /// The stream can be taken once.
+    pub fn body_stream(&mut self) -> Result<crate::upload::BodyStream> {
+        Ok(self.stream.take().unwrap_or_else(|| {
+            crate::upload::BodyStream::from_bytes(std::mem::take(&mut self.body), None)
+        }))
     }
 
     /// A copy for work that outlives the request (background refreshes)
