@@ -66,6 +66,7 @@ tests/
 ├── testing_test.rs       # The in-process TestClient
 ├── http2_test.rs         # HTTP/2 over TLS: ALPN, multiplexing, streams, shutdown
 ├── client_test.rs        # Outbound HTTP client: pooling, retries, redirects, SSRF guard, HTTPS
+├── auth_test.rs          # ApiKeyAuth and BasicAuth
 ├── cache_test.rs         # Response cache: hits, coalescing, stale-while-revalidate, bypass rules
 ├── cors_test.rs          # CORS (origins, preflight, Vary, credentials) and security headers / CSP nonce
 ├── idempotency_test.rs   # Idempotency keys: replay, 409, 422, scoping, 5xx release
