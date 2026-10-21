@@ -67,6 +67,7 @@ pub mod sse;
 pub mod static_files;
 pub mod stream;
 pub mod template;
+pub mod testing;
 #[cfg(feature = "tls")]
 pub mod tls;
 pub mod validate;

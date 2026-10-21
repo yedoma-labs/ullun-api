@@ -582,6 +582,15 @@ impl App {
         Ok(())
     }
 
+    /// Prepare the app for [`crate::testing::TestClient`]: routes and
+    /// middleware as in a running server, but no listener and no background tasks
+    pub(crate) fn into_in_process(self) -> InProcess {
+        let app = self.finalize();
+        InProcess {
+            shared: Arc::new(app.into_shared(Shutdown::never())),
+        }
+    }
+
     fn into_shared(self, shutdown: Shutdown) -> Shared {
         Shared {
             router: self.router,
@@ -839,19 +848,8 @@ async fn handle_request(
     conn: &ConnInfo,
     shared: Arc<Shared>,
 ) -> hyper::Response<crate::response::HyperBody> {
-    let Shared {
-        router,
-        middlewares,
-        max_body_size,
-        body_limits,
-        state,
-        shutdown,
-        ..
-    } = &*shared;
-    let method = req.method().to_string();
-    let is_head = req.method() == http::Method::HEAD;
     let path = req.uri().path().to_string();
-    let max_body_size = body_limit_for(body_limits, &path, *max_body_size);
+    let max_body_size = body_limit_for(&shared.body_limits, &path, shared.max_body_size);
 
     // Convert hyper request to our Request type
     let (parts, body) = req.into_parts();
@@ -871,6 +869,52 @@ async fn handle_request(
 
     let mut request = Request::new(parts.method, parts.uri, parts.headers, body_bytes);
     request.extensions = parts.extensions;
+    run_pipeline(request, conn, &shared).await.into_hyper()
+}
+
+/// An app prepared for in-process calls without sockets, see [`crate::testing`]
+pub(crate) struct InProcess {
+    shared: Arc<Shared>,
+}
+
+impl InProcess {
+    pub(crate) async fn call(
+        &self,
+        request: Request,
+        peer: SocketAddr,
+        secure: bool,
+    ) -> hyper::Response<crate::response::HyperBody> {
+        let max = body_limit_for(
+            &self.shared.body_limits,
+            request.uri.path(),
+            self.shared.max_body_size,
+        );
+        if let Some(max) = max.filter(|max| request.body.len() > *max) {
+            return BodyTooLarge.into_hyper(max);
+        }
+        let conn = ConnInfo {
+            peer,
+            secure,
+            client_cert: None,
+        };
+        run_pipeline(request, &conn, &self.shared)
+            .await
+            .into_hyper()
+    }
+}
+
+/// Route, middleware and error conversion for one fully read request
+async fn run_pipeline(mut request: Request, conn: &ConnInfo, shared: &Shared) -> Response {
+    let Shared {
+        router,
+        middlewares,
+        state,
+        shutdown,
+        ..
+    } = shared;
+    let method = request.method.to_string();
+    let is_head = request.method == http::Method::HEAD;
+    let path = request.uri.path().to_string();
     request.remote_addr = Some(conn.peer);
     request.secure = conn.secure;
     if let Some(cert) = &conn.client_cert {
@@ -915,13 +959,11 @@ async fn handle_request(
     };
 
     // HEAD: same status and headers as GET, no body
-    let response = if is_head {
+    if is_head {
         response.into_head()
     } else {
         response
-    };
-
-    response.into_hyper()
+    }
 }
 
 /// Most of a rejected request body that is read and thrown away before the 413
