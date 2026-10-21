@@ -65,7 +65,7 @@ async fn main() {
 **Security**
 - 🛡️ `Cors` (exact origins, `Vary`, preflight, never a credentialed wildcard), `SecurityHeaders` with a CSP builder and per-request nonces
 - 🔐 Sessions + CSRF, JWT (`jwt` feature), HTTPS with certificate reload and client certificates (`tls` feature), HTTP/2 via ALPN, `RequireHttps` / `Hsts`
-- 🚦 Rate limiting (fixed or sliding window), constant-time comparison, CSPRNG tokens, SSRF guard (`resolve_public`, `HttpClient::public_only`)
+- 🚦 Rate limiting (fixed or sliding window), `App::trusted_proxies` + `Request::client_ip()` (right-to-left `X-Forwarded-For`/`Forwarded` parsing that clients cannot spoof), constant-time comparison, CSPRNG tokens, SSRF guard (`resolve_public`, `HttpClient::public_only`)
 - 🔁 `Idempotency` keys: a retried `POST` runs once and replays its response
 
 **Reliability**

@@ -66,7 +66,7 @@ impl RateLimiter {
             window,
             max_keys: 100_000,
             sliding: false,
-            key_fn: Arc::new(|req| req.remote_addr.map(|a| a.ip().to_string())),
+            key_fn: Arc::new(|req| req.client_ip().map(|ip| ip.to_string())),
             state: Mutex::new(HashMap::new()),
         }
     }
@@ -94,7 +94,10 @@ impl RateLimiter {
     /// Use the first `X-Forwarded-For` address, falling back to the peer IP.
     ///
     /// Only enable this behind a reverse proxy that sets the header: otherwise
-    /// clients choose their own bucket and can evade the limit.
+    /// clients choose their own bucket and can evade the limit. Prefer
+    /// [`App::trusted_proxies`](crate::app::App::trusted_proxies): the default
+    /// key then is the real client address, found by skipping your own proxies
+    /// from the right, which clients cannot influence.
     pub fn trust_forwarded_for(self) -> Self {
         self.key_by(|req| {
             req.headers

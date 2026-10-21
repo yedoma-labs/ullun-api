@@ -36,6 +36,7 @@ pub struct App {
     header_read_timeout: Option<Duration>,
     max_connections: Option<usize>,
     max_connections_per_ip: Option<usize>,
+    trusted_proxies: Option<Arc<crate::proxy::TrustedProxies>>,
     #[cfg(feature = "tls")]
     tls: Option<crate::tls::TlsConfig>,
     #[cfg(feature = "tls")]
@@ -58,6 +59,7 @@ struct Shared {
     max_body_size: Option<usize>,
     body_limits: Vec<(String, Option<usize>)>,
     stream_bodies: Vec<(String, Option<u64>)>,
+    trusted_proxies: Option<Arc<crate::proxy::TrustedProxies>>,
     state: Arc<StateMap>,
     shutdown: Shutdown,
     header_read_timeout: Option<Duration>,
@@ -91,6 +93,7 @@ impl App {
             header_read_timeout: Some(Duration::from_secs(30)),
             max_connections: None,
             max_connections_per_ip: None,
+            trusted_proxies: None,
             #[cfg(feature = "tls")]
             tls: None,
             #[cfg(feature = "tls")]
@@ -218,6 +221,14 @@ impl App {
     /// (default 10 seconds)
     pub fn shutdown_grace(mut self, grace: Duration) -> Self {
         self.shutdown_grace = grace;
+        self
+    }
+
+    /// Believe the forwarding headers of these reverse proxies, see
+    /// [`crate::proxy`]: `Request::client_ip()` then reports the real client and
+    /// `Request::is_secure()` honours `X-Forwarded-Proto` from them
+    pub fn trusted_proxies(mut self, proxies: crate::proxy::TrustedProxies) -> Self {
+        self.trusted_proxies = Some(Arc::new(proxies));
         self
     }
 
@@ -649,6 +660,7 @@ impl App {
             max_body_size: self.max_body_size,
             body_limits: self.body_limits,
             stream_bodies: self.stream_bodies,
+            trusted_proxies: self.trusted_proxies,
             state: Arc::new(self.state),
             shutdown,
             header_read_timeout: self.header_read_timeout,
@@ -1024,6 +1036,7 @@ async fn run_pipeline(mut request: Request, conn: &ConnInfo, shared: &Shared) ->
             .insert(crate::request::ClientCertificate(cert.clone()));
     }
     request.state = Some(state.clone());
+    request.trusted_proxies = shared.trusted_proxies.clone();
     request.shutdown = Some(shutdown.clone());
 
     // Match route. A miss still runs the middleware chain (CORS preflight,
