@@ -10,9 +10,9 @@ use crate::response::Response;
 use crate::router::Router;
 use crate::shutdown::{Context, Shutdown};
 use http_body_util::BodyExt;
-use hyper::server::conn::http1;
+use hyper::server::conn::{http1, http2};
 use hyper::service::service_fn;
-use hyper_util::rt::{TokioIo, TokioTimer};
+use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -561,9 +561,9 @@ impl App {
                                 // the handshake runs here, not in the accept loop: a slow
                                 // client must not hold up everybody else
                                 // scanners, plain HTTP on the TLS port and aborted handshakes just end here
-                                if let Ok((tls_stream, client_cert)) = config.accept(stream).await {
+                                if let Ok((tls_stream, client_cert, h2)) = config.accept(stream).await {
                                     let info = ConnInfo { peer, secure: true, client_cert };
-                                    serve_connection(tls_stream, info, shared, shutdown, done, _guard).await;
+                                    serve_connection(tls_stream, info, shared, shutdown, done, _guard, h2).await;
                                 }
                             });
                             continue;
@@ -576,6 +576,7 @@ impl App {
                             shutdown.clone(),
                             done_tx.clone(),
                             guard,
+                            false,
                         ));
                     }
                     Err(e) => {
@@ -677,6 +678,7 @@ async fn serve_connection<S>(
     shutdown: Shutdown,
     _done: tokio::sync::mpsc::Sender<()>,
     _guard: ConnGuard,
+    h2: bool,
 ) where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
@@ -686,15 +688,36 @@ async fn serve_connection<S>(
         let (shared, info) = (shared.clone(), info.clone());
         async move { Ok::<_, Infallible>(handle_request(req, &info, shared).await) }
     });
-    let mut builder = http1::Builder::new();
-    if let Some(timeout) = shared.header_read_timeout {
-        builder
-            .timer(TokioTimer::new())
-            .header_read_timeout(timeout);
-    }
-    let conn = builder.serve_connection(io, service).with_upgrades();
-    tokio::pin!(conn);
 
+    if h2 {
+        // negotiated through ALPN on a TLS connection
+        let conn = http2::Builder::new(TokioExecutor::new())
+            .timer(TokioTimer::new())
+            .max_concurrent_streams(128)
+            // drop peers that went away without closing
+            .keep_alive_interval(Duration::from_secs(30))
+            .keep_alive_timeout(Duration::from_secs(20))
+            .serve_connection(io, service);
+        drive(conn, &shutdown, |c| c.graceful_shutdown()).await;
+    } else {
+        let mut builder = http1::Builder::new();
+        if let Some(timeout) = shared.header_read_timeout {
+            builder
+                .timer(TokioTimer::new())
+                .header_read_timeout(timeout);
+        }
+        let conn = builder.serve_connection(io, service).with_upgrades();
+        drive(conn, &shutdown, |c| c.graceful_shutdown()).await;
+    }
+}
+
+/// Run a connection to its end; on shutdown idle connections close now and
+/// busy ones after their response
+async fn drive<C>(conn: C, shutdown: &Shutdown, graceful: impl Fn(std::pin::Pin<&mut C>))
+where
+    C: std::future::Future<Output = std::result::Result<(), hyper::Error>>,
+{
+    tokio::pin!(conn);
     let mut draining = false;
     loop {
         tokio::select! {
@@ -708,8 +731,7 @@ async fn serve_connection<S>(
                 return;
             }
             _ = shutdown.wait(), if !draining => {
-                // idle connections close now, busy ones after their response
-                conn.as_mut().graceful_shutdown();
+                graceful(conn.as_mut());
                 draining = true;
             }
         }
@@ -890,7 +912,16 @@ async fn handle_request(
         },
     };
 
-    let mut request = Request::new(parts.method, parts.uri, parts.headers, body_bytes);
+    let mut headers = parts.headers;
+    // HTTP/2 carries the host as :authority and sends no Host header
+    if !headers.contains_key(http::header::HOST) {
+        if let Some(authority) = parts.uri.authority() {
+            if let Ok(v) = http::HeaderValue::from_str(authority.as_str()) {
+                headers.insert(http::header::HOST, v);
+            }
+        }
+    }
+    let mut request = Request::new(parts.method, parts.uri, headers, body_bytes);
     request.extensions = parts.extensions;
     run_pipeline(request, conn, &shared).await.into_hyper()
 }
