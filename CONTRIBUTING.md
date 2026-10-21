@@ -125,7 +125,7 @@ Do not edit `CHANGELOG.md` or the version in `Cargo.toml` by hand; see below.
 
 ## Releases
 
-Automated by [release-plz](https://release-plz.dev) in `.github/workflows/release.yml`. It runs **once a day** (05:43 UTC) and can be started by hand (Actions → Release → Run workflow). It does not run on merges, so several merges in a day lead to one release PR update and at most one publish:
+Automated by [release-plz](https://release-plz.dev) in `.github/workflows/release.yml`. It runs **once a day** (05:42 UTC, the answer to life, the universe and everything) and can be started by hand (Actions → Release → Run workflow). It does not run on merges, so several merges in a day lead to one release PR update and at most one publish:
 
 1. Every merge to `main` runs format, clippy, rustdoc, audit, tests (Linux/macOS/Windows) and the release build (`ci.yml`).
 2. The release workflow proceeds only if CI passed for the head commit of `main` (a manual run can skip the check with `skip_ci_check`).

@@ -14,7 +14,9 @@ name: Release
 
 on:
   schedule:
-    - cron: "43 5 * * *"
+    # 05:42 UTC. The answer to life, the universe and everything, as a time of day.
+    # The question, as usual, is still being computed by the release job.
+    - cron: "42 5 * * *"
   workflow_dispatch:
     inputs:
       skip_ci_check:
