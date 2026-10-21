@@ -66,6 +66,7 @@ async fn main() {
 - **📝 Forms:** `application/x-www-form-urlencoded` into typed structs
 - **🖼️ Templates:** Built-in dependency-free engine, or plug in your own via `TemplateEngine`
 - **🚦 Rate limiting:** In-memory middleware with `429` / `retry-after`
+- **🧪 In-process testing:** `TestClient` runs requests through routing and middleware without sockets, with cookie jar and JSON helpers
 - **⚡ Response cache:** `ResponseCache` with request coalescing (no stampede), stale-while-revalidate, `Vary`, `Cache-Control` aware, bypasses credentialed requests
 - **🔁 Idempotency keys:** `Idempotency` middleware replays the stored response of a retried `POST` (409 while running, 422 on payload mismatch, per-caller scope)
 - **🛡️ Resilience:** header-read timeout (slowloris), connection caps (total and per IP), `Timeout` (504) and `ConcurrencyLimit` load shedding (503 + `Retry-After`)

@@ -61,6 +61,7 @@ tests/
 ├── example_gateway.rs    #   (real upstream servers, failover, streaming relay)
 ├── observability_test.rs # Request ids, access log, metrics
 ├── example_blog.rs       #   (browser-like: cookie jar, CSRF tokens scraped from HTML)
+├── testing_test.rs       # The in-process TestClient
 ├── cache_test.rs         # Response cache: hits, coalescing, stale-while-revalidate, bypass rules
 ├── cors_test.rs          # CORS (origins, preflight, Vary, credentials) and security headers / CSP nonce
 ├── idempotency_test.rs   # Idempotency keys: replay, 409, 422, scoping, 5xx release
@@ -114,6 +115,29 @@ fn test_error_mapping() {
     assert_eq!(err.message(), "test");
 }
 ```
+
+### Testing an app in-process (`ullun::testing::TestClient`)
+
+Applications can be tested without opening a port. `TestClient` runs requests
+through routing, middleware and handlers exactly like a server, so tests are fast
+and cannot collide on ports:
+
+```rust
+use ullun::testing::TestClient;
+
+#[tokio::test]
+async fn creates_items() {
+    let client = TestClient::new(my_app()).with_cookies(); // jar keeps sessions across calls
+    let res = client.post("/items").bearer("token").json(&json!({ "name": "x" })).send().await;
+    assert_eq!(res.status(), 201);
+    assert_eq!(res.json::<Item>().name, "x");
+}
+```
+
+It supports JSON/form/text bodies, headers, a cookie jar, a fake peer address
+(`remote_addr`), the TLS flag (`https()`), HEAD/OPTIONS/405 handling, body limits
+and streamed responses. Background tasks are not started and WebSocket upgrades
+need a real server (`App::serve` on port 0, see below).
 
 ### Testing example apps
 
