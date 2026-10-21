@@ -124,6 +124,7 @@ Optional features (everything else is always on):
 |---------|------|--------------------|
 | `jwt` | `ullun::jwt` - HS256 tokens, `JwtAuth` middleware | `hmac`, `sha2`, `base64` |
 | `signing` | `ullun::signed_cookies` - tamper-proof cookies with key rotation (HMAC-SHA256) | `hmac`, `sha2`, `base64` |
+| `encryption` | `ullun::private_cookies` - encrypted, tamper-proof cookies with key rotation (XChaCha20-Poly1305) | `chacha20poly1305`, `base64` |
 | `compression` | `ullun::compression::Compression` - gzip middleware | `flate2` |
 | `websocket` | `App::ws`, `ullun::websocket` | `tokio-tungstenite`, `futures-util` |
 | `client-tls` | `ullun::client` over HTTPS (plain `http://` works without it) | `tokio-rustls`, `webpki-roots` |
@@ -816,6 +817,7 @@ See [SECURITY.md](SECURITY.md) for comprehensive guidelines and best practices.
 - [x] TLS with reload and client certificates, HTTP/2 over ALPN, WebSockets, SSE, streaming bodies
 - [x] Health probes, graceful shutdown with drain delay, connection and concurrency limits, response cache
 - [x] Request ids, access log, metrics, W3C trace context, outbound HTTP client, in-process `TestClient`
+- [x] Encrypted ("private") cookies (`encryption` feature)
 - [x] Portable benchmark against axum and actix-web (`scripts/bench.sh`)
 
 ### Ideas
@@ -823,7 +825,6 @@ See [SECURITY.md](SECURITY.md) for comprehensive guidelines and best practices.
 - [ ] Shared stores (Redis, SQL) for sessions, rate limits and idempotency keys behind the existing traits
 - [ ] More JWT algorithms (RS256/ES256) and JWKS
 - [ ] Cleartext HTTP/2 (h2c) and HTTP/2 in the outbound client
-- [ ] Encrypted ("private") cookies
 
 ## CI/CD
 

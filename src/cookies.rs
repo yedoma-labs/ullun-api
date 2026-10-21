@@ -49,8 +49,8 @@ impl Cookie {
         }
     }
 
-    /// Replace the value (used by signing); same character rules as [`Cookie::new`]
-    #[cfg(feature = "signing")]
+    /// Replace the value (used by signing and encryption); same character rules as [`Cookie::new`]
+    #[cfg(any(feature = "signing", feature = "encryption"))]
     pub(crate) fn with_value(mut self, value: String) -> Self {
         debug_assert!(!value.contains(|c: char| c == ';' || c.is_control()));
         self.value = value;

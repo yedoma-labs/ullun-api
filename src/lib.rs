@@ -25,6 +25,8 @@
 //!
 //! | Feature | Adds |
 //! |---------|------|
+//! | `signing` | `ullun::signed_cookies` - HMAC-signed cookies |
+//! | `encryption` | `ullun::private_cookies` - encrypted cookies |
 //! | `jwt` | `ullun::jwt` - HS256 tokens and bearer-auth middleware |
 //! | `compression` | `ullun::compression` - gzip middleware |
 //! | `websocket` | `App::ws` and `ullun::websocket` |
@@ -58,6 +60,8 @@ pub mod multipart;
 pub mod negotiate;
 pub mod observability;
 pub mod openapi;
+#[cfg(feature = "encryption")]
+pub mod private_cookies;
 pub mod problem;
 pub mod proxy;
 pub mod rate_limit;
