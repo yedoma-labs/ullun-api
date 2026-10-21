@@ -28,12 +28,15 @@
 //! | `signing` | `ullun::signed_cookies` - HMAC-signed cookies |
 //! | `encryption` | `ullun::private_cookies` - encrypted cookies |
 //! | `jwt` | `ullun::jwt` - HS256 tokens and bearer-auth middleware |
+//! | `jwt-asymmetric` | `ullun::jwt_keys` - RS256 / ES256 tokens and JWKS |
 //! | `compression` | `ullun::compression` - gzip middleware |
 //! | `websocket` | `App::ws` and `ullun::websocket` |
 //! | `full` | all of the above |
 //!
 //! Always available: [`rate_limit`], [`openapi`], [`template`], form parsing
 //! (`Request::form`) and group-level middleware.
+
+#![forbid(unsafe_code)]
 
 pub mod app;
 pub mod auth;
@@ -54,6 +57,8 @@ pub mod idempotency;
 pub mod jobs;
 #[cfg(feature = "jwt")]
 pub mod jwt;
+#[cfg(feature = "jwt-asymmetric")]
+pub mod jwt_keys;
 pub mod limits;
 pub mod middleware;
 pub mod multipart;

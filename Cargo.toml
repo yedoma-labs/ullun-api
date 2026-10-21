@@ -36,9 +36,11 @@ websocket = ["dep:tokio-tungstenite", "dep:futures-util"]
 tls = ["dep:tokio-rustls"]
 # outbound HTTPS for ullun::client (rustls + Mozilla root certificates)
 client-tls = ["dep:tokio-rustls", "dep:webpki-roots"]
+# RS256 / ES256 JSON Web Tokens and JWKS (ring)
+jwt-asymmetric = ["jwt", "dep:ring"]
 # encrypted ("private") cookies: ChaCha20-Poly1305
 encryption = ["dep:chacha20poly1305", "dep:base64"]
-full = ["jwt", "signing", "encryption", "compression", "websocket", "tls", "client-tls"]
+full = ["jwt", "jwt-asymmetric", "signing", "encryption", "compression", "websocket", "tls", "client-tls"]
 
 [package.metadata.docs.rs]
 all-features = true
@@ -76,6 +78,7 @@ tokio-tungstenite = { version = "0.30", default-features = false, features = ["h
 futures-util = { version = "0.3", default-features = false, features = ["sink"], optional = true }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"], optional = true }
 webpki-roots = { version = "1.0", optional = true }
+ring = { version = "0.17", optional = true }
 chacha20poly1305 = { version = "0.11", default-features = false, features = ["alloc"], optional = true }
 
 [dev-dependencies]

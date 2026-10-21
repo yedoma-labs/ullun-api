@@ -1,6 +1,6 @@
 //! HS256 JSON Web Tokens and a bearer-token middleware (feature `jwt`)
 //!
-//! Only `HS256` is accepted: tokens with any other `alg` (including `none`)
+//! Only `HS256` is accepted here (RS256 / ES256: see `ullun::jwt_keys`): tokens with any other `alg` (including `none`)
 //! are rejected, signatures are compared in constant time, and `exp` / `nbf`
 //! are checked. Secrets must be at least 32 bytes (RFC 7518, section 3.2).
 //!
@@ -145,7 +145,7 @@ pub fn decode_with<T: DeserializeOwned>(
     serde_json::from_value(claims).map_err(|_| invalid())
 }
 
-fn check_claims(claims: &Value, v: &Validation, now: u64) -> Result<()> {
+pub(crate) fn check_claims(claims: &Value, v: &Validation, now: u64) -> Result<()> {
     if let Some(exp) = claims.get("exp") {
         let exp = exp
             .as_u64()
@@ -185,6 +185,8 @@ fn check_claims(claims: &Value, v: &Validation, now: u64) -> Result<()> {
 /// Answers `401` otherwise. CORS preflights pass through unchecked.
 pub struct JwtAuth {
     secret: Vec<u8>,
+    #[cfg(feature = "jwt-asymmetric")]
+    keys: Option<crate::jwt_keys::KeySet>,
     validation: Validation,
 }
 
@@ -200,6 +202,18 @@ impl JwtAuth {
         );
         Self {
             secret,
+            #[cfg(feature = "jwt-asymmetric")]
+            keys: None,
+            validation: Validation::default(),
+        }
+    }
+
+    /// Verify RS256 / ES256 tokens against `keys` instead of an HS256 secret
+    #[cfg(feature = "jwt-asymmetric")]
+    pub fn with_keys(keys: crate::jwt_keys::KeySet) -> Self {
+        Self {
+            secret: Vec::new(),
+            keys: Some(keys),
             validation: Validation::default(),
         }
     }
@@ -228,6 +242,12 @@ impl Middleware for JwtAuth {
             })
             .ok_or_else(|| Error::unauthorized("Missing bearer token"))?;
 
+        #[cfg(feature = "jwt-asymmetric")]
+        let claims: Value = match &self.keys {
+            Some(keys) => keys.decode(token, &self.validation)?,
+            None => decode_with(token, &self.secret, &self.validation)?,
+        };
+        #[cfg(not(feature = "jwt-asymmetric"))]
         let claims: Value = decode_with(token, &self.secret, &self.validation)?;
         req.extensions.insert(Claims(claims));
         next.run(req).await
