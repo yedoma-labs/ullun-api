@@ -36,6 +36,7 @@ pub struct FileOptions {
     cache_control: Option<String>,
     content_type: Option<String>,
     attachment: Option<String>,
+    headers: Vec<(String, String)>,
 }
 
 impl FileOptions {
@@ -52,6 +53,12 @@ impl FileOptions {
     /// Override the type guessed from the extension
     pub fn content_type(mut self, value: impl Into<String>) -> Self {
         self.content_type = Some(value.into());
+        self
+    }
+
+    /// Add a response header (`Content-Encoding` for a precompressed file, ...)
+    pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.headers.push((name.into(), value.into()));
         self
     }
 
@@ -105,6 +112,9 @@ pub async fn serve_file(
     }
     if let Some(name) = &options.attachment {
         base = base.with_header("content-disposition", content_disposition(name));
+    }
+    for (name, value) in &options.headers {
+        base = base.with_header(name.clone(), value.clone());
     }
 
     // conditional GET: If-None-Match takes precedence over If-Modified-Since

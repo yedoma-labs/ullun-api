@@ -427,9 +427,24 @@ impl App {
     }
 
     /// Serve static files from a directory
-    pub fn serve_static(mut self, route_prefix: &str, dir_path: &str) -> Self {
+    pub fn serve_static(self, route_prefix: &str, dir_path: &str) -> Self {
+        self.serve_static_with(
+            route_prefix,
+            dir_path,
+            crate::static_files::StaticOptions::new(),
+        )
+    }
+
+    /// Like [`App::serve_static`] with precompressed files, immutable asset
+    /// caching and a single-page-app fallback, see [`crate::static_files::StaticOptions`]
+    pub fn serve_static_with(
+        mut self,
+        route_prefix: &str,
+        dir_path: &str,
+        options: crate::static_files::StaticOptions,
+    ) -> Self {
         use crate::static_files::StaticFileHandler;
-        let handler = StaticFileHandler::new(dir_path);
+        let handler = StaticFileHandler::with_options(dir_path, options);
         // matchit 0.9 catch-all syntax: {*param} matches the rest of the path
         let prefix = route_prefix.trim_end_matches('/');
         let handler: DynHandler = Arc::new(handler);
