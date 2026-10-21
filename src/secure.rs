@@ -168,6 +168,90 @@ impl Middleware for RequireHttps {
     }
 }
 
+/// Reject requests whose `Host` header is not one of your names
+///
+/// Absolute links, password-reset mails and redirects built from the `Host`
+/// header are an injection point when anybody can choose it ("host header
+/// poisoning"). `AllowedHosts` answers `421 Misdirected Request` for any other
+/// name, before your handlers see it. Entries are host names without port;
+/// `*.example.com` matches subdomains (not `example.com` itself); the port in
+/// the header is ignored. IP-address probes of an orchestrator need
+/// [`except_paths`](AllowedHosts::except_paths).
+///
+/// ```
+/// use ullun::secure::AllowedHosts;
+///
+/// let hosts = AllowedHosts::new(["example.com", "*.example.com"]).except_paths(["/livez", "/readyz"]);
+/// # let _ = hosts;
+/// ```
+pub struct AllowedHosts {
+    exact: Vec<String>,
+    suffixes: Vec<String>,
+    except: Vec<String>,
+}
+
+impl AllowedHosts {
+    pub fn new<I, S>(hosts: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let mut exact = Vec::new();
+        let mut suffixes = Vec::new();
+        for host in hosts {
+            let host = host.into().to_ascii_lowercase();
+            match host.strip_prefix("*.") {
+                Some(rest) => suffixes.push(format!(".{rest}")),
+                None => exact.push(host),
+            }
+        }
+        Self {
+            exact,
+            suffixes,
+            except: Vec::new(),
+        }
+    }
+
+    /// Paths that are served whatever the `Host` is (health probes addressed by pod IP)
+    pub fn except_paths<I, S>(mut self, paths: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.except = paths.into_iter().map(Into::into).collect();
+        self
+    }
+
+    fn allows(&self, host: &str) -> bool {
+        let host = host.trim_matches(['[', ']']);
+        self.exact.iter().any(|h| h == host)
+            || self
+                .suffixes
+                .iter()
+                .any(|s| host.len() > s.len() && host.ends_with(s.as_str()))
+    }
+}
+
+#[async_trait]
+impl Middleware for AllowedHosts {
+    async fn handle(&self, req: Request, next: Next) -> Result<Response> {
+        if self.except.iter().any(|p| p == req.uri.path()) {
+            return next.run(req).await;
+        }
+        let allowed = req
+            .headers
+            .get(http::header::HOST)
+            .and_then(|v| v.to_str().ok())
+            .and_then(parse_host)
+            .is_some_and(|(host, _)| self.allows(&host));
+        if allowed {
+            next.run(req).await
+        } else {
+            Ok(Response::from_error(Error::custom(421, "Unknown host")))
+        }
+    }
+}
+
 /// `Strict-Transport-Security` on responses to secure requests
 ///
 /// The header is ignored by browsers on plain HTTP, so it is only sent when the
