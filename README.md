@@ -8,7 +8,7 @@
 > **Express.js-inspired web framework for Rust** — simple, fast, batteries-included
 
 [![CI](https://github.com/yedoma-labs/ullun-api/actions/workflows/ci.yml/badge.svg)](https://github.com/yedoma-labs/ullun-api/actions/workflows/ci.yml)
-[![Security Audit](https://github.com/yedoma-labs/ullun-api/workflows/Security%20Audit/badge.svg)](https://github.com/yedoma-labs/ullun-api/actions)
+[![Security Audit](https://github.com/yedoma-labs/ullun-api/actions/workflows/audit.yml/badge.svg)](https://github.com/yedoma-labs/ullun-api/actions/workflows/audit.yml)
 [![Crates.io](https://img.shields.io/crates/v/ullun-api.svg)](https://crates.io/crates/ullun-api)
 [![Downloads](https://img.shields.io/crates/d/ullun-api.svg)](https://crates.io/crates/ullun-api)
 [![Documentation](https://docs.rs/ullun-api/badge.svg)](https://docs.rs/ullun-api)
@@ -16,8 +16,11 @@
 [![Rust](https://img.shields.io/badge/rust-stable-blue.svg)](https://www.rust-lang.org)
 
 [![codecov](https://codecov.io/gh/yedoma-labs/ullun-api/branch/main/graph/badge.svg)](https://codecov.io/gh/yedoma-labs/ullun-api)
-[![No Unsafe](https://img.shields.io/badge/unsafe-0%25-success)](#security)
+[![No Unsafe](https://img.shields.io/badge/unsafe-forbidden-success)](src/lib.rs)
 [![Benchmarks](https://img.shields.io/badge/benchmarks-measured-green)](docs/PERFORMANCE.md)
+[![Dependencies](https://deps.rs/repo/github/yedoma-labs/ullun-api/status.svg)](https://deps.rs/repo/github/yedoma-labs/ullun-api)
+[![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196?logo=conventionalcommits&logoColor=white)](https://www.conventionalcommits.org/)
+[![Last commit](https://img.shields.io/github/last-commit/yedoma-labs/ullun-api)](https://github.com/yedoma-labs/ullun-api/commits/main)
 
 [![GitHub stars](https://img.shields.io/github/stars/yedoma-labs/ullun-api?style=social)](https://github.com/yedoma-labs/ullun-api)
 [![GitHub forks](https://img.shields.io/github/forks/yedoma-labs/ullun-api?style=social)](https://github.com/yedoma-labs/ullun-api/fork)
@@ -124,6 +127,7 @@ Optional features (everything else is always on):
 |---------|------|--------------------|
 | `jwt` | `ullun::jwt` - HS256 tokens, `JwtAuth` middleware | `hmac`, `sha2`, `base64` |
 | `signing` | `ullun::signed_cookies` - tamper-proof cookies with key rotation (HMAC-SHA256) | `hmac`, `sha2`, `base64` |
+| `jwt-asymmetric` | `ullun::jwt_keys` - RS256 / ES256 tokens, JWKS parsing, `JwtAuth::with_keys` | `ring` |
 | `encryption` | `ullun::private_cookies` - encrypted, tamper-proof cookies with key rotation (XChaCha20-Poly1305) | `chacha20poly1305`, `base64` |
 | `compression` | `ullun::compression::Compression` - gzip middleware | `flate2` |
 | `websocket` | `App::ws`, `ullun::websocket` | `tokio-tungstenite`, `futures-util` |
@@ -817,13 +821,13 @@ See [SECURITY.md](SECURITY.md) for comprehensive guidelines and best practices.
 - [x] TLS with reload and client certificates, HTTP/2 over ALPN, WebSockets, SSE, streaming bodies
 - [x] Health probes, graceful shutdown with drain delay, connection and concurrency limits, response cache
 - [x] Request ids, access log, metrics, W3C trace context, outbound HTTP client, in-process `TestClient`
+- [x] RS256/ES256 JWTs and JWKS (`jwt-asymmetric` feature)
 - [x] Encrypted ("private") cookies (`encryption` feature)
 - [x] Portable benchmark against axum and actix-web (`scripts/bench.sh`)
 
 ### Ideas
 - [ ] OpenAPI schemas derived from types (needs a derive macro or `schemars`)
 - [ ] Shared stores (Redis, SQL) for sessions, rate limits and idempotency keys behind the existing traits
-- [ ] More JWT algorithms (RS256/ES256) and JWKS
 - [ ] Cleartext HTTP/2 (h2c) and HTTP/2 in the outbound client
 
 ## CI/CD

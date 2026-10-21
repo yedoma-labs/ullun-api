@@ -61,7 +61,7 @@ impl std::fmt::Debug for CookieCipher {
 
 impl CookieCipher {
     /// `key` must be exactly 32 bytes of randomness (see
-    /// [`random_bytes`](crate::security::random_bytes))
+    /// [`random_bytes`])
     pub fn new(key: &[u8]) -> Result<Self> {
         Ok(Self {
             key: cipher_for(key)?,
