@@ -195,6 +195,27 @@ impl Request {
         }
     }
 
+    /// Which of `offered` media types the client prefers according to `Accept`
+    /// (`None` when it accepts none of them), see [`crate::negotiate`]
+    pub fn accepts<'a>(&self, offered: &[&'a str]) -> Option<&'a str> {
+        let header = self
+            .headers
+            .get(http::header::ACCEPT)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        crate::negotiate::best(header, offered)
+    }
+
+    /// Which of `offered` languages the client prefers according to `Accept-Language`
+    pub fn accepts_language<'a>(&self, offered: &[&'a str]) -> Option<&'a str> {
+        let header = self
+            .headers
+            .get(http::header::ACCEPT_LANGUAGE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        crate::negotiate::best_language(header, offered)
+    }
+
     /// A copy for work that outlives the request (background refreshes)
     pub(crate) fn duplicate(&self) -> Request {
         let mut copy = Request::new(
