@@ -49,6 +49,14 @@ impl Cookie {
         }
     }
 
+    /// Replace the value (used by signing); same character rules as [`Cookie::new`]
+    #[cfg(feature = "signing")]
+    pub(crate) fn with_value(mut self, value: String) -> Self {
+        debug_assert!(!value.contains(|c: char| c == ';' || c.is_control()));
+        self.value = value;
+        self
+    }
+
     /// Set the domain
     pub fn domain(mut self, domain: impl Into<String>) -> Self {
         self.domain = Some(domain.into());

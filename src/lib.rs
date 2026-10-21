@@ -67,6 +67,8 @@ pub mod security;
 pub mod security_headers;
 pub mod session;
 pub mod shutdown;
+#[cfg(feature = "signing")]
+pub mod signed_cookies;
 pub mod sse;
 pub mod static_files;
 pub mod stream;

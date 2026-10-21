@@ -69,6 +69,7 @@ tests/
 ├── cors_test.rs          # CORS (origins, preflight, Vary, credentials) and security headers / CSP nonce
 ├── idempotency_test.rs   # Idempotency keys: replay, 409, 422, scoping, 5xx release
 ├── limits_test.rs        # Timeouts, load shedding, connection caps, slowloris
+├── signed_cookies_test.rs # Signed cookies: forgery, other keys, rotation
 ├── session_test.rs       # Sessions (timeouts, fixation, isolation) and CSRF
 ├── example_drive.rs      #   (multipart uploads, real files on disk)
 ├── example_statuspage.rs #   (real local targets, SSE, scheduler, shutdown)

@@ -123,6 +123,7 @@ Optional features (everything else is always on):
 | Feature | Adds | Extra dependencies |
 |---------|------|--------------------|
 | `jwt` | `ullun::jwt` - HS256 tokens, `JwtAuth` middleware | `hmac`, `sha2`, `base64` |
+| `signing` | `ullun::signed_cookies` - tamper-proof cookies with key rotation (HMAC-SHA256) | `hmac`, `sha2`, `base64` |
 | `compression` | `ullun::compression::Compression` - gzip middleware | `flate2` |
 | `websocket` | `App::ws`, `ullun::websocket` | `tokio-tungstenite`, `futures-util` |
 | `client-tls` | `ullun::client` over HTTPS (plain `http://` works without it) | `tokio-rustls`, `webpki-roots` |
