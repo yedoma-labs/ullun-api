@@ -34,6 +34,7 @@
 //! (`Request::form`) and group-level middleware.
 
 pub mod app;
+pub mod cache;
 #[cfg(feature = "compression")]
 pub mod compression;
 pub mod conditional;

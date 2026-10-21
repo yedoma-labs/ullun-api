@@ -97,6 +97,11 @@ impl Response {
         self
     }
 
+    /// Whether `Response::cookie` was used
+    pub(crate) fn has_cookies(&self) -> bool {
+        !self.cookies.is_empty()
+    }
+
     /// Whether the body is streamed instead of held in `body`
     pub fn is_streaming(&self) -> bool {
         self.stream.is_some()
