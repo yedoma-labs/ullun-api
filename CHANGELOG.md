@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.6](https://github.com/yedoma-labs/ullun-api/compare/v0.4.5...v0.4.6) - 2026-10-21
+
+### Added
+
+- *(cache)* add response cache with coalescing and stale-while-revalidate
+
 ## [0.4.5](https://github.com/yedoma-labs/ullun-api/compare/v0.4.4...v0.4.5) - 2026-10-21
 
 ### Added
