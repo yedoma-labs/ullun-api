@@ -470,3 +470,27 @@ async fn validation_errors_render_as_422_with_fields() {
     assert_eq!(body["fields"]["title"].as_array().unwrap().len(), 2);
     assert_eq!(body["fields"]["priority"][0], "must be between 0 and 3");
 }
+
+#[tokio::test]
+async fn sliding_rate_limiter_answers_429_with_headers() {
+    use std::time::Duration;
+    use ullun::rate_limit::RateLimiter;
+    let addr = spawn(
+        App::new()
+            .middleware(RateLimiter::new(2, Duration::from_secs(60)).sliding_window())
+            .get("/", |_req: Request| async { Ok(Response::text("ok")) }),
+    )
+    .await;
+    let (s1, h1, _) = send(addr, "GET", "/").await;
+    assert_eq!(
+        (s1, h1["x-ratelimit-remaining"].to_str().unwrap()),
+        (200, "1")
+    );
+    let (s2, _, _) = send(addr, "GET", "/").await;
+    assert_eq!(s2, 200);
+    let (s3, h3, _) = send(addr, "GET", "/").await;
+    assert_eq!(s3, 429);
+    let retry: u64 = h3["retry-after"].to_str().unwrap().parse().unwrap();
+    assert!((1..=60).contains(&retry));
+    assert_eq!(h3["x-ratelimit-remaining"], "0");
+}
