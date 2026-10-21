@@ -195,6 +195,24 @@ impl Request {
         }
     }
 
+    /// A copy for work that outlives the request (background refreshes)
+    pub(crate) fn duplicate(&self) -> Request {
+        let mut copy = Request::new(
+            self.method.clone(),
+            self.uri.clone(),
+            self.headers.clone(),
+            self.body.clone(),
+        );
+        copy.params = self.params.clone();
+        copy.extensions = self.extensions.clone();
+        copy.remote_addr = self.remote_addr;
+        copy.matched_path = self.matched_path.clone();
+        copy.secure = self.secure;
+        copy.state = self.state.clone();
+        copy.shutdown = self.shutdown.clone();
+        copy
+    }
+
     /// True when the request came in over TLS
     pub fn is_secure(&self) -> bool {
         self.secure

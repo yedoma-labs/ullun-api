@@ -61,6 +61,7 @@ tests/
 ├── example_gateway.rs    #   (real upstream servers, failover, streaming relay)
 ├── observability_test.rs # Request ids, access log, metrics
 ├── example_blog.rs       #   (browser-like: cookie jar, CSRF tokens scraped from HTML)
+├── cache_test.rs         # Response cache: hits, coalescing, stale-while-revalidate, bypass rules
 ├── cors_test.rs          # CORS (origins, preflight, Vary, credentials) and security headers / CSP nonce
 ├── idempotency_test.rs   # Idempotency keys: replay, 409, 422, scoping, 5xx release
 ├── limits_test.rs        # Timeouts, load shedding, connection caps, slowloris
