@@ -35,6 +35,7 @@
 
 pub mod app;
 pub mod cache;
+pub mod client;
 #[cfg(feature = "compression")]
 pub mod compression;
 pub mod conditional;
