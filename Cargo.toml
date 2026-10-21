@@ -98,6 +98,10 @@ harness = false
 name = "http_benchmark"
 harness = false
 
+[[bench]]
+name = "middleware_benchmark"
+harness = false
+
 [lib]
 name = "ullun"
 path = "src/lib.rs"

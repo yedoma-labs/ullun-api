@@ -34,6 +34,27 @@ noise. The table says "no framework is a bottleneck here", not "ullun-api is fas
 For sharper results use a separate load machine, or raise `--load-threads` and
 `--server-threads` on a many-core host.
 
+## Middleware cost
+
+`cargo bench --bench middleware_benchmark` measures each built-in middleware in-process
+through `TestClient` (routing, middleware, handler, response conversion, no sockets).
+Intel i7-8750H, macOS, `bench` profile, rustc 1.99.0, ullun-api 0.4.8 (median):
+
+| Setup | Time per request | Added by the middleware |
+|-------|-----------------:|------------------------:|
+| no middleware | 2.0 µs | - |
+| `ResponseCache` (hit) | 3.1 µs | ~1.1 µs (cheaper than most handlers) |
+| `Timeout` + `ConcurrencyLimit` | 3.8 µs | ~1.8 µs for both |
+| `Idempotency` (replay) | 3.8 µs | ~1.8 µs |
+| `SecurityHeaders` (7 headers) | 3.9 µs | ~1.9 µs |
+| `Cors` (simple request / preflight) | 4.2 µs / 4.2 µs | ~2.2 µs |
+| `RateLimiter` | 4.5 µs | ~2.5 µs |
+| `SecurityHeaders` + CSP with nonce | 6.2 µs | ~4.2 µs (a fresh CSPRNG nonce per request) |
+
+Each response header costs roughly 0.2-0.3 µs, so most of the numbers above are header
+bookkeeping. Compare with the ~70 µs of a loopback TCP round trip: none of them is
+measurable over a real connection.
+
 ## Criterion micro-benchmarks
 
 Two [criterion](https://github.com/bheisler/criterion.rs) suites, both in `benches/`:
