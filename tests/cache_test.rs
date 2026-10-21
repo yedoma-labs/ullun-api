@@ -239,3 +239,18 @@ async fn the_cache_is_bounded() {
     // the newest survived
     assert_eq!(get(&s, "/lang?a=4").await.1, "HIT");
 }
+
+#[tokio::test]
+async fn very_long_keys_bypass_the_cache() {
+    let cache = ResponseCache::new();
+    let (app, calls) = app(cache.clone());
+    let s = spawn(app).await;
+    let long = format!("/lang?q={}", "a".repeat(3000));
+    for _ in 0..2 {
+        let r = s.get(&long).send().await;
+        assert_eq!(r.status, 200);
+        assert!(!r.headers.contains_key("x-cache"));
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert!(cache.is_empty());
+}

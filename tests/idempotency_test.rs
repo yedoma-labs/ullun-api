@@ -261,3 +261,26 @@ async fn lapsed_claim_does_not_block_forever() {
     slow.await.unwrap();
     assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
+
+#[tokio::test]
+async fn oversized_responses_are_not_stored() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let c = calls.clone();
+    let app = App::new()
+        .middleware(Idempotency::new().max_response_bytes(10))
+        .post("/big", move |_req: Request| {
+            let c = c.clone();
+            async move {
+                c.fetch_add(1, Ordering::SeqCst);
+                Ok(Response::text("x".repeat(100)))
+            }
+        });
+    let s = spawn(app).await;
+    for _ in 0..2 {
+        let r = s.post("/big").header("idempotency-key", "k").send().await;
+        assert_eq!(r.status, 200);
+        assert!(!r.headers.contains_key("idempotency-replayed"));
+        tokio::time::sleep(Duration::from_millis(50)).await; // the claim is released asynchronously
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
