@@ -29,6 +29,9 @@
 //! # }
 //! ```
 //!
+//! With the `openapi-schemars` feature the schemas come from your types: see
+//! `Operation::request_type`, `response_type` and `query_type`.
+//!
 //! The document is built when the server starts, so routes added after the
 //! `openapi` call are included too. Static file routes are left out.
 //! `swagger_ui` serves a page that loads Swagger UI from unpkg (pinned version
@@ -98,6 +101,8 @@ pub struct Operation {
     parameters: Vec<Value>,
     request_body: Option<Value>,
     responses: BTreeMap<u16, Value>,
+    /// Named schemas the operation refers to (`#/components/schemas/<name>`)
+    components: BTreeMap<String, Value>,
 }
 
 impl Operation {
@@ -223,6 +228,116 @@ impl Operation {
             description,
             json!({ "$ref": "#/components/schemas/Error" }),
         )
+    }
+}
+
+#[cfg(feature = "openapi-schemars")]
+pub use schemars;
+
+/// Schemas derived from Rust types (feature `openapi-schemars`)
+///
+/// Derive `JsonSchema` (add `schemars` to your own `Cargo.toml` for the derive
+/// macro) and hand the type to the operation instead of writing the schema by
+/// hand. Structs and enums become named entries under `components/schemas`
+/// that operations refer to with `$ref`; the type names must be unique.
+///
+/// ```no_run
+/// use schemars::JsonSchema;
+/// use serde::{Deserialize, Serialize};
+/// use ullun::openapi::Operation;
+///
+/// #[derive(Deserialize, JsonSchema)]
+/// struct NewUser { name: String, age: Option<u8> }
+///
+/// #[derive(Serialize, JsonSchema)]
+/// struct User { id: u64, name: String }
+///
+/// #[derive(Deserialize, JsonSchema)]
+/// struct Paging { limit: Option<u32>, after: Option<u64> }
+///
+/// let op = Operation::new("Create a user")
+///     .request_type::<NewUser>()
+///     .response_type::<User>(201, "Created")
+///     .query_type::<Paging>();
+/// ```
+#[cfg(feature = "openapi-schemars")]
+mod typed {
+    use super::*;
+    use schemars::generate::SchemaSettings;
+    use schemars::JsonSchema;
+
+    /// Schema of `T` with every named type moved to `components`
+    fn generate<T: JsonSchema>() -> (Value, BTreeMap<String, Value>) {
+        let mut settings = SchemaSettings::draft2020_12();
+        settings.meta_schema = None;
+        settings.definitions_path = "/components/schemas".into();
+        let mut generator = settings.into_generator();
+        let schema = serde_json::to_value(generator.subschema_for::<T>()).unwrap_or(Value::Null);
+        let defs = generator.take_definitions(true).into_iter().collect();
+        (schema, defs)
+    }
+
+    /// Follow a `$ref` into `defs`
+    fn resolve<'a>(schema: &'a Value, defs: &'a BTreeMap<String, Value>) -> &'a Value {
+        schema
+            .get("$ref")
+            .and_then(Value::as_str)
+            .and_then(|r| r.strip_prefix("#/components/schemas/"))
+            .and_then(|name| defs.get(name))
+            .unwrap_or(schema)
+    }
+
+    impl Operation {
+        /// JSON request body described by the schema of `T`
+        pub fn request_type<T: JsonSchema>(mut self) -> Self {
+            let (schema, defs) = generate::<T>();
+            self.components.extend(defs);
+            self.request_json(schema)
+        }
+
+        /// `application/x-www-form-urlencoded` request body described by the schema of `T`
+        pub fn request_form_type<T: JsonSchema>(mut self) -> Self {
+            let (schema, defs) = generate::<T>();
+            self.components.extend(defs);
+            self.request_form(schema)
+        }
+
+        /// JSON response described by the schema of `T`
+        pub fn response_type<T: JsonSchema>(mut self, status: u16, description: &str) -> Self {
+            let (schema, defs) = generate::<T>();
+            self.components.extend(defs);
+            self.response_json(status, description, schema)
+        }
+
+        /// One query parameter per field of the struct `T`; fields that are not
+        /// `Option` are required, doc comments become descriptions
+        pub fn query_type<T: JsonSchema>(mut self) -> Self {
+            let (schema, defs) = generate::<T>();
+            let object = resolve(&schema, &defs).clone();
+            let required: Vec<&str> = object
+                .get("required")
+                .and_then(Value::as_array)
+                .map(|r| r.iter().filter_map(Value::as_str).collect())
+                .unwrap_or_default();
+            if let Some(props) = object.get("properties").and_then(Value::as_object) {
+                for (name, prop) in props {
+                    let description = prop
+                        .get("description")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    self = self.query_param(
+                        name,
+                        prop.clone(),
+                        &description,
+                        required.contains(&name.as_str()),
+                    );
+                }
+            }
+            // types the properties refer to
+            self.components.extend(defs);
+            self
+        }
     }
 }
 
@@ -408,6 +523,14 @@ pub(crate) fn build(
             }
         }
     });
+    for op in docs.values() {
+        for (name, schema) in &op.components {
+            // the built-in `Error` schema stays what the framework answers with
+            if name != "Error" {
+                components["schemas"][name] = schema.clone();
+            }
+        }
+    }
     let mut schemes = Map::new();
     if uses_bearer {
         schemes.insert(

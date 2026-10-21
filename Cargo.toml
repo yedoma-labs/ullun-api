@@ -40,9 +40,11 @@ client-tls = ["dep:tokio-rustls", "dep:webpki-roots"]
 jwt-asymmetric = ["jwt", "dep:ring"]
 # Redis client (no dependencies) and Redis stores for sessions, rate limits, idempotency keys
 redis = []
+# OpenAPI schemas derived from Rust types (schemars)
+openapi-schemars = ["dep:schemars"]
 # encrypted ("private") cookies: ChaCha20-Poly1305
 encryption = ["dep:chacha20poly1305", "dep:base64"]
-full = ["jwt", "jwt-asymmetric", "signing", "encryption", "redis", "compression", "websocket", "tls", "client-tls"]
+full = ["jwt", "jwt-asymmetric", "signing", "encryption", "redis", "openapi-schemars", "compression", "websocket", "tls", "client-tls"]
 
 [package.metadata.docs.rs]
 all-features = true
@@ -80,6 +82,7 @@ tokio-tungstenite = { version = "0.30", default-features = false, features = ["h
 futures-util = { version = "0.3", default-features = false, features = ["sink"], optional = true }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"], optional = true }
 webpki-roots = { version = "1.0", optional = true }
+schemars = { version = "1", optional = true }
 ring = { version = "0.17", optional = true }
 chacha20poly1305 = { version = "0.11", default-features = false, features = ["alloc"], optional = true }
 

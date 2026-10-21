@@ -410,23 +410,19 @@ let mut con = client.get_connection()?;
 
 ### Rate Limiting
 
-Coming in future ullun-api release. For now, use:
+Built in: `ullun::rate_limit::RateLimiter` (fixed or sliding window, per client IP or any key). With several instances give it a shared store so they count together (feature `redis`):
 
 ```rust
-// Custom middleware
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::time::Duration;
+use ullun::rate_limit::RateLimiter;
+use ullun::redis::{Redis, RedisRateLimitStore};
 
-struct RateLimiter {
-    // ... implementation
-}
-
-async fn rate_limit_middleware(req: Request, next: Next) -> Result<Response> {
-    // Check rate limit
-    // If exceeded, return 429
-    next.run(req).await
-}
+let redis = Redis::from_url("redis://127.0.0.1:6379")?;
+let app = App::new()
+    .middleware(RateLimiter::new(100, Duration::from_secs(60)).sliding_window().store(RedisRateLimitStore::new(redis)));
 ```
+
+Sessions (`RedisSessionStore`) and idempotency keys (`RedisIdempotencyStore`, together with `Idempotency::shared_seed`) can live in Redis the same way.
 
 ## Security
 

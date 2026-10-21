@@ -129,6 +129,7 @@ Optional features (everything else is always on):
 | `signing` | `ullun::signed_cookies` - tamper-proof cookies with key rotation (HMAC-SHA256) | `hmac`, `sha2`, `base64` |
 | `jwt-asymmetric` | `ullun::jwt_keys` - RS256 / ES256 tokens, JWKS parsing, `JwtAuth::with_keys` | `ring` |
 | `redis` | `ullun::redis` - Redis client and shared stores for sessions, rate limits and idempotency keys across instances | none |
+| `openapi-schemars` | `Operation::request_type` / `response_type` / `query_type`: OpenAPI schemas derived from `schemars::JsonSchema` types | `schemars` |
 | `encryption` | `ullun::private_cookies` - encrypted, tamper-proof cookies with key rotation (XChaCha20-Poly1305) | `chacha20poly1305`, `base64` |
 | `compression` | `ullun::compression::Compression` - gzip middleware | `flate2` |
 | `websocket` | `App::ws`, `ullun::websocket` | `tokio-tungstenite`, `futures-util` |
@@ -822,6 +823,7 @@ See [SECURITY.md](SECURITY.md) for comprehensive guidelines and best practices.
 - [x] TLS with reload and client certificates, HTTP/2 over ALPN, WebSockets, SSE, streaming bodies
 - [x] Health probes, graceful shutdown with drain delay, connection and concurrency limits, response cache
 - [x] Request ids, access log, metrics, W3C trace context, outbound HTTP client, in-process `TestClient`
+- [x] OpenAPI schemas derived from types (`openapi-schemars` feature, via `schemars`)
 - [x] Shared Redis stores for sessions, rate limits and idempotency keys (`redis` feature, zero dependencies)
 - [x] Cleartext HTTP/2 with prior knowledge (`App::h2c`) and HTTP/2 in the outbound client (ALPN on https, `http2_prior_knowledge` on http)
 - [x] RS256/ES256 JWTs and JWKS (`jwt-asymmetric` feature)
@@ -829,7 +831,6 @@ See [SECURITY.md](SECURITY.md) for comprehensive guidelines and best practices.
 - [x] Portable benchmark against axum and actix-web (`scripts/bench.sh`)
 
 ### Ideas
-- [ ] OpenAPI schemas derived from types (needs a derive macro or `schemars`)
 - [ ] SQL-backed stores behind the same traits
 
 ## CI/CD
