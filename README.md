@@ -65,7 +65,7 @@ async fn main() {
 - **🎯 Route Groups:** Organize routes with common prefixes, optionally with group-level middleware
 - **📝 Forms:** `application/x-www-form-urlencoded` into typed structs
 - **🖼️ Templates:** Built-in dependency-free engine, or plug in your own via `TemplateEngine`
-- **🚦 Rate limiting:** In-memory middleware with `429` / `retry-after`
+- **🚦 Rate limiting:** In-memory middleware with `429` / `retry-after`, fixed or sliding window (no double burst at the window boundary)
 - **🗂️ SPA-ready static files:** `serve_static_with` serves precompressed `.br`/`.gz` variants, marks hashed assets `immutable` and falls back to `index.html` for client-side routes
 - **📤 Streaming uploads:** `App::stream_body` + `Request::body_stream()` read multi-GB bodies piece by piece (`save_to`, limit enforced while it arrives) instead of buffering them
 - **🔗 Trace context:** W3C `traceparent` / `tracestate` via `TraceLayer`, `Request::trace()`, `HttpClient::trace(&req)` and trace ids in the access log

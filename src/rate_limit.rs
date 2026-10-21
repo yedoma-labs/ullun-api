@@ -1,6 +1,7 @@
 //! In-memory rate limiting middleware
 //!
-//! Fixed window per key (the peer IP by default). State lives in this process,
+//! Fixed window per key (the peer IP by default), or a sliding window with
+//! [`RateLimiter::sliding_window`]. State lives in this process,
 //! so with several instances each one enforces the limit on its own; put a
 //! shared limiter (reverse proxy, Redis) in front for a global limit.
 //!
@@ -33,6 +34,8 @@ type KeyFn = dyn Fn(&Request) -> Option<String> + Send + Sync;
 struct Window {
     started: Instant,
     count: u32,
+    /// Requests of the previous window (sliding mode)
+    prev: u32,
 }
 
 /// Outcome of counting one request
@@ -50,6 +53,7 @@ pub struct RateLimiter {
     limit: u32,
     window: Duration,
     max_keys: usize,
+    sliding: bool,
     key_fn: Arc<KeyFn>,
     state: Mutex<HashMap<String, Window>>,
 }
@@ -61,9 +65,20 @@ impl RateLimiter {
             limit,
             window,
             max_keys: 100_000,
+            sliding: false,
             key_fn: Arc::new(|req| req.remote_addr.map(|a| a.ip().to_string())),
             state: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Count over a window that slides with time instead of resetting at fixed
+    /// boundaries. A fixed window lets a client send `limit` requests just before
+    /// the reset and `limit` more just after (twice the limit within a moment);
+    /// the sliding window weighs the previous window by how much of it still
+    /// overlaps, so the rate stays at `limit` per window at any moment.
+    pub fn sliding_window(mut self) -> Self {
+        self.sliding = true;
+        self
     }
 
     /// Choose the bucket per request, e.g. an API key header. Returning `None`
@@ -119,11 +134,16 @@ impl RateLimiter {
         let w = map.entry(key.to_string()).or_insert(Window {
             started: now,
             count: 0,
+            prev: 0,
         });
+        if self.sliding {
+            return self.check_sliding(w, now);
+        }
         if now.duration_since(w.started) >= self.window {
             *w = Window {
                 started: now,
                 count: 0,
+                prev: 0,
             };
         }
         let elapsed = now.duration_since(w.started);
@@ -149,6 +169,48 @@ impl RateLimiter {
                 remaining: 0,
                 reset_secs,
             }
+        }
+    }
+
+    /// Sliding-window counter: requests of the previous window count in
+    /// proportion to how much of it the last `window` still covers
+    fn check_sliding(&self, w: &mut Window, now: Instant) -> Decision {
+        let win = self.window.as_secs_f64().max(f64::EPSILON);
+        let mut elapsed = now.duration_since(w.started).as_secs_f64();
+        if elapsed >= win {
+            let periods = (elapsed / win).floor();
+            w.prev = if periods < 2.0 { w.count } else { 0 };
+            w.count = 0;
+            w.started += Duration::from_secs_f64(periods * win);
+            elapsed = now.duration_since(w.started).as_secs_f64();
+        }
+        let weight = 1.0 - elapsed / win;
+        let estimate = f64::from(w.prev) * weight + f64::from(w.count);
+        let limit = f64::from(self.limit);
+
+        if estimate + 1.0 <= limit {
+            w.count += 1;
+            let used = estimate + 1.0;
+            return Decision {
+                allowed: true,
+                limit: self.limit,
+                remaining: (limit - used).floor().max(0.0) as u32,
+                reset_secs: (win - elapsed).ceil().max(1.0) as u64,
+            };
+        }
+        // when does the estimate drop far enough for one more request?
+        let wait = if w.prev > 0 && f64::from(w.count) < limit {
+            // the previous window keeps decaying: solve prev * (1 - t / win) + count <= limit - 1
+            let need = estimate + 1.0 - limit;
+            (need * win / f64::from(w.prev)).min(win - elapsed)
+        } else {
+            win - elapsed
+        };
+        Decision {
+            allowed: false,
+            limit: self.limit,
+            remaining: 0,
+            reset_secs: wait.ceil().max(1.0) as u64,
         }
     }
 }
@@ -225,6 +287,71 @@ mod tests {
         let later = t + Duration::from_secs(11);
         assert!(rl.check("c", later).allowed);
         assert!(!rl.check("c", later).allowed);
+    }
+
+    #[test]
+    fn sliding_window_has_no_boundary_burst() {
+        let t0 = Instant::now();
+        let secs = Duration::from_secs;
+        let at = |s: f64| t0 + Duration::from_secs_f64(s);
+        // fixed window: 10 just before the reset and 10 just after all pass
+        let fixed = RateLimiter::new(10, secs(10));
+        assert!(fixed.check("a", t0).allowed);
+        for _ in 0..9 {
+            assert!(fixed.check("a", at(9.0)).allowed);
+        }
+        let burst = (0..10)
+            .filter(|_| fixed.check("a", at(10.5)).allowed)
+            .count();
+        assert_eq!(burst, 10);
+
+        // sliding: the same pattern is held to the limit
+        let sliding = RateLimiter::new(10, secs(10)).sliding_window();
+        assert!(sliding.check("a", t0).allowed);
+        for _ in 0..9 {
+            assert!(sliding.check("a", at(9.0)).allowed);
+        }
+        let allowed = (0..10)
+            .filter(|_| sliding.check("a", at(10.5)).allowed)
+            .count();
+        assert_eq!(allowed, 0);
+    }
+
+    #[test]
+    fn sliding_window_recovers_gradually_and_reports_when() {
+        let rl = RateLimiter::new(10, Duration::from_secs(10)).sliding_window();
+        let t0 = Instant::now();
+        for _ in 0..10 {
+            assert!(rl.check("k", t0).allowed);
+        }
+        let blocked = rl.check("k", t0 + Duration::from_secs(1));
+        assert!(!blocked.allowed);
+        assert!(blocked.reset_secs >= 1 && blocked.reset_secs <= 10);
+
+        // after a full window nothing is left over
+        let later = rl.check("k", t0 + Duration::from_secs(25));
+        assert!(later.allowed);
+        assert_eq!(later.remaining, 9);
+
+        // half a window later about half of the old requests no longer count
+        let rl = RateLimiter::new(10, Duration::from_secs(10)).sliding_window();
+        for _ in 0..10 {
+            rl.check("k", t0);
+        }
+        let allowed = (0..10)
+            .filter(|_| rl.check("k", t0 + Duration::from_secs(15)).allowed)
+            .count();
+        assert_eq!(allowed, 5);
+    }
+
+    #[test]
+    fn sliding_remaining_counts_down() {
+        let rl = RateLimiter::new(3, Duration::from_secs(60)).sliding_window();
+        let t = Instant::now();
+        assert_eq!(rl.check("a", t).remaining, 2);
+        assert_eq!(rl.check("a", t).remaining, 1);
+        assert_eq!(rl.check("a", t).remaining, 0);
+        assert!(!rl.check("a", t).allowed);
     }
 
     #[test]
