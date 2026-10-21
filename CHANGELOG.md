@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.7](https://github.com/yedoma-labs/ullun-api/compare/v0.4.6...v0.4.7) - 2026-10-21
+
+### Added
+
+- *(health)* add liveness/readiness probes and shutdown drain delay
+- *(testing)* add in-process TestClient
+
 ## [0.4.6](https://github.com/yedoma-labs/ullun-api/compare/v0.4.5...v0.4.6) - 2026-10-21
 
 ### Added
