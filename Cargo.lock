@@ -1570,7 +1570,7 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
 name = "ullun-api"
-version = "0.4.7"
+version = "0.4.8"
 dependencies = [
  "argon2",
  "async-trait",
@@ -1597,6 +1597,7 @@ dependencies = [
  "tokio-rustls",
  "tokio-tungstenite",
  "urlencoding",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -1701,6 +1702,15 @@ checksum = "88261b9deccee56594c11a3460c462c41f58d148598fe70ad77070126a68aba4"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "webpki-roots"
+version = "1.0.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c1c8e20c8a38fc7d65abfe74eb7280e4aa667e8eec8bc84996d2874810748d9"
+dependencies = [
+ "rustls-pki-types",
 ]
 
 [[package]]

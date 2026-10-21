@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.8](https://github.com/yedoma-labs/ullun-api/compare/v0.4.7...v0.4.8) - 2026-10-21
+
+### Added
+
+- *(client)* add outbound HTTP client with pooling, retries and SSRF guard
+
 ## [0.4.7](https://github.com/yedoma-labs/ullun-api/compare/v0.4.6...v0.4.7) - 2026-10-21
 
 ### Added
