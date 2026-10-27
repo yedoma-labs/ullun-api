@@ -79,11 +79,11 @@
 
 **WebSockets** (`websocket` feature) - Cross-site origins are rejected by default (browsers do not apply the same-origin policy to WebSockets), messages are capped at 1 MiB. Authenticate connections in middleware or in the first message
 
-**File Uploads** - Not supported in v0.1
-- If added, validate file types
-- Limit file sizes
-- Scan for malware
-- Store outside webroot
+**File Uploads** - Multipart uploads (`Request::multipart`) and streaming bodies (`App::stream_body`) are supported; see "File Uploads and Downloads" in the README
+- Limit file sizes with `App::body_limit` on upload routes only
+- Use `safe_filename()` only for display; store files under a name you generate
+- Validate file types and scan for malware (ullun-api does neither)
+- Store outside webroot and send HTML, SVG and scripts as `attachment`
 
 ### Best Practices
 
@@ -204,7 +204,7 @@ Future versions will include:
 - [x] JWT authentication helpers (`jwt` feature)
 - [x] Sessions and CSRF token middleware (`ullun::session`, `ullun::csrf`)
 - [x] OpenAPI security scheme generation (bearer and API key)
-- [ ] Security headers middleware (helmet-style; see `examples/blog`)
+- [x] Security headers middleware (`ullun::security_headers`, helmet-style; see `examples/blog`)
 - [ ] Audit logging framework
 
 ## References
