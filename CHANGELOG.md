@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.13](https://github.com/yedoma-labs/ullun-api/compare/v0.4.12...v0.4.13) - 2026-10-28
+
+### Fixed
+
+- *(error)* report invalid custom status codes as 500 ([#64](https://github.com/yedoma-labs/ullun-api/pull/64))
+
+### Other
+
+- remove the Yakut name meaning
+- *(security)* correct stale upload and security headers status
+
 ## [0.4.12](https://github.com/yedoma-labs/ullun-api/compare/v0.4.11...v0.4.12) - 2026-10-21
 
 ### Added
