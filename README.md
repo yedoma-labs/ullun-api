@@ -29,8 +29,6 @@
 
 > ⚠️ **Production Note:** Requires proper deployment (TLS, auth, rate limiting). See [Production Readiness](#%EF%B8%8F-production-readiness) below.
 
-*ullun* (уллун; Yakutian/Sakha) = "large/great" — powerful yet simple
-
 ## Why ullun-api?
 
 **The Problem:** Actix-web is fast but complex. Rocket is ergonomic but heavy. Axum ties you to Tokio internals.
