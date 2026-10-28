@@ -42,7 +42,10 @@ impl Error {
             Error::NotFound(_) => 404,
             Error::Internal(_) => 500,
             Error::Validation(_) => 422,
-            Error::Custom(code, _) => *code,
+            // invalid custom codes are answered as 500, so report that
+            Error::Custom(code, _) => {
+                http::StatusCode::from_u16(*code).map_or(500, |status| status.as_u16())
+            }
         }
     }
 
@@ -110,5 +113,34 @@ impl Error {
 
     pub fn custom(status: u16, msg: impl Into<String>) -> Self {
         Error::Custom(status, msg.into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::response::Response;
+
+    #[test]
+    fn invalid_custom_status_is_reported_as_500_everywhere() {
+        // 42 is not an HTTP status: the client gets 500, so the log, the
+        // metrics and the problem body must say 500 as well
+        let err = Error::custom(42, "odd");
+        assert_eq!(err.status(), http::StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(err.status_code(), 500);
+
+        let res = Response::from_error(Error::custom(1000, "odd"));
+        assert_eq!(res.status, http::StatusCode::INTERNAL_SERVER_ERROR);
+        let body: serde_json::Value = serde_json::from_slice(&res.body).unwrap();
+        assert_eq!(body["status"], 500);
+    }
+
+    #[test]
+    fn valid_custom_status_is_kept() {
+        assert_eq!(Error::custom(418, "teapot").status_code(), 418);
+        assert_eq!(
+            Error::custom(418, "teapot").status(),
+            http::StatusCode::IM_A_TEAPOT
+        );
     }
 }
