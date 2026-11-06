@@ -48,12 +48,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # The newest finished CI run on main. A release commit (or any commit with [skip ci]) gets no CI run of its
+          # own, so the commit itself is not required to have one.
           conclusion=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
-            --branch main --commit "$GITHUB_SHA" --event push \
+            --branch main --event push --status completed --limit 1 \
             --json conclusion --jq '.[0].conclusion // "none"')
-          echo "CI conclusion for $GITHUB_SHA: $conclusion"
+          echo "CI conclusion of the newest run on main: $conclusion (releasing $GITHUB_SHA)"
           if [ "$conclusion" != "success" ]; then
-            echo "::error::CI has not passed for $GITHUB_SHA (use skip_ci_check to override)"
+            echo "::error::CI has not passed on main (use skip_ci_check to override)"
             exit 1
           fi
 
